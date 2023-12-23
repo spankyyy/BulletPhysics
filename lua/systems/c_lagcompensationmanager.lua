@@ -105,12 +105,16 @@ end
 
 function C_LagCompensationManager:GetPlayerHitboxStates(TargetTick)
     local States = {}
-    local I = 1
-    for k, Ply in pairs(player.GetAll()) do
+    local PlayerCount = player_GetCount()
+    local Players = player_GetAll()
+
+    for i = 1, PlayerCount do
+        local Ply = Players[i]
         local State = C_LagCompensationManager:GetPlayerHitboxState(Ply, TargetTick)
-        States[I] = {Ply, State}
-        I = I + 1
-    end 
+
+        States[i] = {Ply, State}
+    end
+
     return States
 end
 
