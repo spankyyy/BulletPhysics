@@ -193,10 +193,12 @@ if SERVER then
         C_LagCompensationManager:AskForInterp(Player)
     end)
 
-    for _, Player in pairs(player.GetAll()) do
-        C_LagCompensationManager:AskForInterp(Player)
-    end
+    local PlayerCount = player_GetCount()
+    local Players = player_GetAll()
 
+    for i = 1, PlayerCount do
+        C_LagCompensationManager:AskForInterp(Players[i])
+    end
 end
 
 if CLIENT then
