@@ -15,7 +15,8 @@ C_LagCompensationManager.CompensationInProgress = false
 
 -- Gets the player metatable
 PlayerMeta = FindMetaTable("Player")
-
+local player_GetCount = player.GetCount
+local player_GetAll = player.GetAll
 
 local function RenderHitbox(Hitbox)
     if not Hitbox then return end
@@ -104,12 +105,16 @@ end
 
 function C_LagCompensationManager:GetPlayerHitboxStates(TargetTick)
     local States = {}
-    local I = 1
-    for k, Ply in pairs(player.GetAll()) do
+    local PlayerCount = player_GetCount()
+    local Players = player_GetAll()
+
+    for i = 1, PlayerCount do
+        local Ply = Players[i]
         local State = C_LagCompensationManager:GetPlayerHitboxState(Ply, TargetTick)
-        States[I] = {Ply, State}
-        I = I + 1
-    end 
+
+        States[i] = {Ply, State}
+    end
+
     return States
 end
 
@@ -131,7 +136,7 @@ function C_LagCompensationManager:EndLagCompensation()
 end
 
 function C_LagCompensationManager:AskForInterp(Ply)
-    net.Start("LagCompInterp")
+    net.Start(BulletPhysics.HookIdentifier .. "LagCompInterp")
     net.Send(Ply)
 end
 
@@ -162,13 +167,17 @@ if SERVER then
     -- Network string for sending bullets to clients
     util.AddNetworkString("LagCompInterp")
 
-    hook.Add("Tick", "LagComensationHitboxStates", function()
-        for k,v in pairs(player.GetAll()) do
-            C_LagCompensationManager:SavePlayerHitboxState(v)
-        end 
+    hook.Add("Tick", BulletPhysics.HookIdentifier .. "LagComensationHitboxStates", function()
+        local PlayerCount = player_GetCount()
+        local Players = player_GetAll()
+
+        for i = 1, PlayerCount do
+            local ply = Players[i]
+            C_LagCompensationManager:SavePlayerHitboxState(ply)
+        end
     end)
 
-    net.Receive("LagCompInterp", function(len, ply)
+    net.Receive(BulletPhysics.HookIdentifier .. "LagCompInterp", function(_, ply)
         local cl_interp = net.ReadFloat()
         local cl_interp_ratio = net.ReadFloat()
         local cl_updaterate = net.ReadFloat()
@@ -180,26 +189,27 @@ if SERVER then
         ply.Interps.cl_updaterate = cl_updaterate
     end)
 
-    hook.Add("PlayerInitialSpawn", "LagComensationGetInterps", function(Player)
+    hook.Add("PlayerInitialSpawn", BulletPhysics.HookIdentifier .. "LagComensationGetInterps", function(Player)
         C_LagCompensationManager:AskForInterp(Player)
     end)
 
-    for _, Player in pairs(player.GetAll()) do
-        C_LagCompensationManager:AskForInterp(Player)
-    end
+    local PlayerCount = player_GetCount()
+    local Players = player_GetAll()
 
+    for i = 1, PlayerCount do
+        C_LagCompensationManager:AskForInterp(Players[i])
+    end
 end
 
 if CLIENT then
-    net.Receive("LagCompInterp", function()
+    net.Receive(BulletPhysics.HookIdentifier .. "LagCompInterp", function()
         local cl_interp = GetConVar("cl_interp"):GetFloat()
         local cl_interp_ratio = GetConVar("cl_interp_ratio"):GetFloat()
         local cl_updaterate = GetConVar("cl_updaterate"):GetInt()
-
-        net.Start("LagCompInterp")
-            net.WriteFloat(cl_interp)
-            net.WriteFloat(cl_interp_ratio)
-            net.WriteFloat(cl_updaterate)
+        net.Start(BulletPhysics.HookIdentifier .. "LagCompInterp")
+        net.WriteFloat(cl_interp)
+        net.WriteFloat(cl_interp_ratio)
+        net.WriteFloat(cl_updaterate)
         net.SendToServer()
     end)
 end
