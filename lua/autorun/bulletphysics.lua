@@ -10,7 +10,7 @@ _G.BulletPhysics = BulletPhysics
 
 -- Hook name
 local HookIndentifier = "BPhys_"
-
+BulletPhysics.HookIdentifier = HookIndentifier
 -- Initialize the systems
 local BulletPhysicsProjectileSystem = C_ProjectileSystem:New()
 BulletPhysics.ProjectileSystem = BulletPhysicsProjectileSystem
