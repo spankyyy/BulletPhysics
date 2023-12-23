@@ -7,11 +7,14 @@ include("systems/c_projectilesystem.lua")
 
 local BulletPhysics = {}
 _G.BulletPhysics = BulletPhysics
+
 local player_GetCount = player.GetCount
 local player_GetAll = player.GetAll
+
 -- Hook name
 local HookIndentifier = "BPhys_"
 BulletPhysics.HookIdentifier = HookIndentifier
+
 -- Initialize the systems
 local BulletPhysicsProjectileSystem = C_ProjectileSystem:New()
 BulletPhysics.ProjectileSystem = BulletPhysicsProjectileSystem
@@ -69,7 +72,7 @@ end
 -- Only available on server
 if SERVER then
     -- Network string for sending bullets to clients
-    util.AddNetworkString(HookIndentifier .. "NetworkBullets")
+    util.AddNetworkString("BulletPhysicsNetworkBullets")
     -- Assign a manager to players that join the game
     hook.Add("PlayerInitialSpawn", HookIndentifier .. "PlayerSpawned", AssignManager)
 
@@ -84,11 +87,9 @@ if SERVER then
     -- Create the server manager
     BulletPhysicsProjectileSystem:CreateGlobalManager()
     BulletPhysicsProjectileSystem:GetGlobalManager().OnCreateProjectile = OnCreateProjectile
-
 end
 
 if CLIENT then
-
     hook.Add("InitPostEntity", HookIndentifier .. "LocalPlayerSpawned", function()
         AssignManager(LocalPlayer())
         _G.BulletPhysicsClientInitialized = true
@@ -102,7 +103,7 @@ if CLIENT then
     BulletPhysicsProjectileSystem:CreateGlobalManager()
 
     -- Receive bullets from sources other than localplayer
-    net.Receive(HookIndentifier .. "NetworkBullets", function()
+    net.Receive("BulletPhysicsNetworkBullets", function()
         local BulletInfo = {}
 
         BulletInfo.Attacker = net.ReadEntity()
@@ -130,7 +131,6 @@ end)
 
 -- Run unpredicted managers
 hook.Add("Tick", HookIndentifier .. "UnpredictedManagerLogic", function()
-    
     -- Run managers for every projectile system
     for _, Manager in ipairs(BulletPhysicsProjectileSystem:GetManagers()) do
         -- Run the manager
@@ -240,7 +240,7 @@ function BulletPhysics:GetAmmoTypeDamage(AmmoID)
     -- Attempt to return a cached value first.
     if self.AmmoTypeCache[AmmoID] then return self.AmmoTypeCache[AmmoID] end
     -- Set the cached variable for appropriate ammo type.
-    self.AmmoTypeCache[AmmoID] = game.GetAmmoPlayerDamage(AmmoID0)
+    self.AmmoTypeCache[AmmoID] = game.GetAmmoPlayerDamage(AmmoID)
 
     return self.AmmoTypeCache[AmmoID]
 end
