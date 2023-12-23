@@ -29,15 +29,15 @@ local function OnCreateProjectile(self, BulletInfo)
     -- Dont run if theres no players to send a message to
     if Players:GetCount() == 0 then return end
     -- Send messages to players other than attacker
-    net.Start("NetworkBullets", true)
-        net.WriteEntity(BulletInfo.Attacker)
-        net.WriteFloat(BulletInfo.HullSize)
-        net.WriteFloat(BulletInfo.Dir[1])
-        net.WriteFloat(BulletInfo.Dir[2])
-        net.WriteFloat(BulletInfo.Dir[3])
-        net.WriteFloat(BulletInfo.Src[1])
-        net.WriteFloat(BulletInfo.Src[2])
-        net.WriteFloat(BulletInfo.Src[3])
+    net.Start(HookIndentifier .. "NetworkBullets", true)
+    net.WriteEntity(BulletInfo.Attacker)
+    net.WriteFloat(BulletInfo.HullSize)
+    net.WriteFloat(BulletInfo.Dir[1])
+    net.WriteFloat(BulletInfo.Dir[2])
+    net.WriteFloat(BulletInfo.Dir[3])
+    net.WriteFloat(BulletInfo.Src[1])
+    net.WriteFloat(BulletInfo.Src[2])
+    net.WriteFloat(BulletInfo.Src[3])
     net.Send(Players)
 end
 
@@ -68,8 +68,7 @@ end
 -- Only available on server
 if SERVER then
     -- Network string for sending bullets to clients
-    util.AddNetworkString("NetworkBullets")
-
+    util.AddNetworkString(HookIndentifier .. "NetworkBullets")
     -- Assign a manager to players that join the game
     hook.Add("PlayerInitialSpawn", HookIndentifier .. "PlayerSpawned", AssignManager)
 
@@ -99,7 +98,7 @@ if CLIENT then
     BulletPhysicsProjectileSystem:CreateGlobalManager()
 
     -- Receive bullets from sources other than localplayer
-    net.Receive("NetworkBullets", function()
+    net.Receive(HookIndentifier .. "NetworkBullets", function()
         local BulletInfo = {}
 
         BulletInfo.Attacker = net.ReadEntity()
