@@ -167,10 +167,14 @@ if SERVER then
     -- Network string for sending bullets to clients
     util.AddNetworkString("LagCompInterp")
 
-    hook.Add("Tick", "LagComensationHitboxStates", function()
-        for k,v in pairs(player.GetAll()) do
-            C_LagCompensationManager:SavePlayerHitboxState(v)
-        end 
+    hook.Add("Tick", BulletPhysics.HookIdentifier .. "LagComensationHitboxStates", function()
+        local PlayerCount = player_GetCount()
+        local Players = player_GetAll()
+
+        for i = 1, PlayerCount do
+            local ply = Players[i]
+            C_LagCompensationManager:SavePlayerHitboxState(ply)
+        end
     end)
 
     net.Receive("LagCompInterp", function(len, ply)
