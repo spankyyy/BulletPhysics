@@ -136,7 +136,7 @@ function C_LagCompensationManager:EndLagCompensation()
 end
 
 function C_LagCompensationManager:AskForInterp(Ply)
-    net.Start("LagCompInterp")
+    net.Start(BulletPhysics.HookIdentifier .. "LagCompInterp")
     net.Send(Ply)
 end
 
@@ -177,7 +177,7 @@ if SERVER then
         end
     end)
 
-    net.Receive("LagCompInterp", function(len, ply)
+    net.Receive(BulletPhysics.HookIdentifier .. "LagCompInterp", function(_, ply)
         local cl_interp = net.ReadFloat()
         local cl_interp_ratio = net.ReadFloat()
         local cl_updaterate = net.ReadFloat()
@@ -189,7 +189,7 @@ if SERVER then
         ply.Interps.cl_updaterate = cl_updaterate
     end)
 
-    hook.Add("PlayerInitialSpawn", "LagComensationGetInterps", function(Player)
+    hook.Add("PlayerInitialSpawn", BulletPhysics.HookIdentifier .. "LagComensationGetInterps", function(Player)
         C_LagCompensationManager:AskForInterp(Player)
     end)
 
@@ -200,15 +200,14 @@ if SERVER then
 end
 
 if CLIENT then
-    net.Receive("LagCompInterp", function()
+    net.Receive(BulletPhysics.HookIdentifier .. "LagCompInterp", function()
         local cl_interp = GetConVar("cl_interp"):GetFloat()
         local cl_interp_ratio = GetConVar("cl_interp_ratio"):GetFloat()
         local cl_updaterate = GetConVar("cl_updaterate"):GetInt()
-
-        net.Start("LagCompInterp")
-            net.WriteFloat(cl_interp)
-            net.WriteFloat(cl_interp_ratio)
-            net.WriteFloat(cl_updaterate)
+        net.Start(BulletPhysics.HookIdentifier .. "LagCompInterp")
+        net.WriteFloat(cl_interp)
+        net.WriteFloat(cl_interp_ratio)
+        net.WriteFloat(cl_updaterate)
         net.SendToServer()
     end)
 end
