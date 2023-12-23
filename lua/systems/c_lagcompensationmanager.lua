@@ -165,7 +165,7 @@ end
 
 if SERVER then
     -- Network string for sending bullets to clients
-    util.AddNetworkString("LagCompInterp")
+    util.AddNetworkString(BulletPhysics.HookIdentifier .. "LagCompInterp")
 
     hook.Add("Tick", BulletPhysics.HookIdentifier .. "LagComensationHitboxStates", function()
         local PlayerCount = player_GetCount()
@@ -207,9 +207,9 @@ if CLIENT then
         local cl_interp_ratio = GetConVar("cl_interp_ratio"):GetFloat()
         local cl_updaterate = GetConVar("cl_updaterate"):GetInt()
         net.Start(BulletPhysics.HookIdentifier .. "LagCompInterp")
-        net.WriteFloat(cl_interp)
-        net.WriteFloat(cl_interp_ratio)
-        net.WriteFloat(cl_updaterate)
+            net.WriteFloat(cl_interp)
+            net.WriteFloat(cl_interp_ratio)
+            net.WriteFloat(cl_updaterate)
         net.SendToServer()
     end)
 end

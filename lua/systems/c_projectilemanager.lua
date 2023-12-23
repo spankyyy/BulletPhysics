@@ -163,7 +163,7 @@ function ProjectileInfo:FireBullet()
     if not self.MoveTrace.Hit then return end
 
     local HitEntity = self.MoveTrace.Entity
-    if HitEntity and HitEntity:IsValid() and HitEntity ~= self.Attacker then
+    if HitEntity and HitEntity:IsValid() and HitEntity ~= self.Attacker and SERVER then
         local CalculatedDamage = self:CalculateDamage(HitEntity)
 
         local Attacker = self.Attacker
