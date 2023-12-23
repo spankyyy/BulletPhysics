@@ -151,13 +151,9 @@ function ProjectileInfo:CalculateDamage(Entity)
     if not self.AmmoID then return self.BulletInfo.Damage end
 
     local Damage = 0
-    if Entity:IsPlayer() then
-        Damage = game.GetAmmoPlayerDamage(self.AmmoID)
-    end
 
-    if Entity:IsNPC() then
-        --Damage = game.GetAmmoNPCDamage(self.AmmoID)
-        Damage = game.GetAmmoPlayerDamage(self.AmmoID)
+    if Entity:IsPlayer() or Entity:IsNPC() then
+        Damage = BulletPhysics:GetAmmoTypeDamage(self.AmmoID)
     end
 
     return Damage
