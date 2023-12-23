@@ -230,3 +230,13 @@ if CLIENT then
     end)
 end
 
+BulletPhysics.AmmoTypeCache = {}
+
+function BulletPhysics:GetAmmoTypeDamage(AmmoID)
+    -- Attempt to return a cached value first.
+    if self.AmmoTypeCache[AmmoID] then return self.AmmoTypeCache[AmmoID] end
+    -- Set the cached variable for appropriate ammo type.
+    self.AmmoTypeCache[AmmoID] = game_GetAmmoPlayerDamage(AmmoID0)
+
+    return self.AmmoTypeCache[AmmoID]
+end
