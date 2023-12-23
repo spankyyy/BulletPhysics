@@ -7,7 +7,8 @@ include("systems/c_projectilesystem.lua")
 
 local BulletPhysics = {}
 _G.BulletPhysics = BulletPhysics
-
+local player_GetCount = player.GetCount
+local player_GetAll = player.GetAll
 -- Hook name
 local HookIndentifier = "BPhys_"
 BulletPhysics.HookIdentifier = HookIndentifier
@@ -73,8 +74,11 @@ if SERVER then
     hook.Add("PlayerInitialSpawn", HookIndentifier .. "PlayerSpawned", AssignManager)
 
     -- Allow for lua refresh
-    for _, Player in pairs(player.GetAll()) do
-        AssignManager(Player)
+    local PlayerCount = player_GetCount()
+    local Players = player_GetAll()
+
+    for i = 1, PlayerCount do
+        AssignManager(Players[i])
     end
 
     -- Create the server manager
@@ -128,7 +132,7 @@ end)
 hook.Add("Tick", HookIndentifier .. "UnpredictedManagerLogic", function()
     
     -- Run managers for every projectile system
-    for _, Manager in pairs(BulletPhysicsProjectileSystem:GetManagers()) do
+    for _, Manager in ipairs(BulletPhysicsProjectileSystem:GetManagers()) do
         -- Run the manager
         Manager:OnSetupMoveUnpredicted()
     end
