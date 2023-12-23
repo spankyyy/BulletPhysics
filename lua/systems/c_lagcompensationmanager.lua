@@ -15,7 +15,8 @@ C_LagCompensationManager.CompensationInProgress = false
 
 -- Gets the player metatable
 PlayerMeta = FindMetaTable("Player")
-
+local player_GetCount = player.GetCount
+local player_GetAll = player.GetAll
 
 local function RenderHitbox(Hitbox)
     if not Hitbox then return end
