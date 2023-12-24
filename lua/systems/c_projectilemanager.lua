@@ -94,8 +94,6 @@ function ProjectileInfo:Setup(BulletInfo)
 
     if self.BulletInfo.Damage == 0 and self.BulletInfo.AmmoType ~= "" then
         self.AmmoID = game.GetAmmoID(self.BulletInfo.AmmoType)
-
-        --self.BulletInfo.Force = game.GetAmmoForce(self.AmmoID)
     end
 
     self.BulletInfo.Spread = nil
@@ -185,7 +183,7 @@ function ProjectileInfo:FireBullet()
         ImpactDamage:SetReportedPosition(self.MoveTrace.HitPos - self.MoveTrace.Normal)
 
         -- Apply damage to entity
-        HitEntity:TakeDamageInfo(ImpactDamage)
+        HitEntity:DispatchTraceAttack(ImpactDamage, self.MoveTrace, self.MoveTrace.HitNormal )
     end
 
     if not self.Manager:GetPrediction() or CLIENT then
@@ -228,6 +226,7 @@ end
 
 function ProjectileInfo:Simulate()
     //print("Projectile ID:" .. self.Index .. " got simulated.")
+    local Settings = self.BulletInfo.Settings
     local UpdateRate = engine.TickInterval()
     
     local Velocity = self.Velocity
@@ -245,7 +244,7 @@ function ProjectileInfo:Simulate()
     self.Forward = Velocity:GetNormalized()
 
     -- Bounce
-    if self.MoveTrace.Hit then
+    if self.MoveTrace.Hit and Settings.ShouldBounce then
         local Fraction = (1 - self.MoveTrace.Fraction)
         local Hit = false
         for i=1, 16 do
@@ -274,7 +273,7 @@ function ProjectileInfo:Simulate()
     end
 
     -- Apply gravity
-    local Gravity = Vector(0, 0, -1000) * UpdateRate
+    local Gravity = Vector(0, 0, -(self.BulletInfo.Gravity or 1000)) * UpdateRate
     self.Velocity = self.Velocity + Gravity
 
     self.TimeAtLastSimulation = UnPredictedCurTime()
@@ -298,7 +297,7 @@ function ProjectileInfo:OnHit()
     if self.ShouldFireBulletOnHit or true then
         self:FireBullet()
 
-        if CLIENT then
+        if CLIENT and self.BulletInfo.Settings.EnableSounds then
             EmitSound("sonic_Crack.Distant", self.MoveTrace.HitPos, 0, CHAN_STATIC, 5, 160, 0, 150, 0)
         end
     end
@@ -329,7 +328,6 @@ function ProjectileInfo:OnBounce()
 end
 
 if CLIENT then
-
     // Rendering
 
     local function ClientModel(Data)
@@ -592,7 +590,9 @@ if CLIENT then
 
     function C_ProjectileManager:CrackProjectiles()
         for _, Projectile in next, self:GetProjectiles() do
-            Projectile:Crack()
+            if Projectile.BulletInfo.Settings.EnableSounds then
+                Projectile:Crack()
+            end
         end
     end
 end

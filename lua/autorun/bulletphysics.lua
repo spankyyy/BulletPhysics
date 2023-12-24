@@ -4,10 +4,12 @@ include("systems/c_hitboxsystem.lua")
 include("systems/c_lagcompensationmanager.lua")
 include("systems/c_projectilemanager.lua")
 include("systems/c_projectilesystem.lua")
+include("systems/settings.lua")
 
 local BulletPhysics = {}
 _G.BulletPhysics = BulletPhysics
 
+-- Cached functions
 local player_GetCount = player.GetCount
 local player_GetAll = player.GetAll
 
@@ -19,6 +21,42 @@ BulletPhysics.HookIdentifier = HookIndentifier
 local BulletPhysicsProjectileSystem = C_ProjectileSystem:New()
 BulletPhysics.ProjectileSystem = BulletPhysicsProjectileSystem
 
+
+// Settings
+BulletPhysics.Settings = BulletPhysics.Settings or {}
+
+local function NetworkSettingsToClients(Settings)
+    timer.Simple(0, function()
+        net.Start("NetworkBulletPhysicsSettings")
+            net.WriteTable(Settings)
+        net.Broadcast()
+    end)
+end
+
+if SERVER then
+    BulletPhysicsSettings:UpdateSettings()
+    BulletPhysics.Settings = BulletPhysicsSettings:GetSettings()
+    NetworkSettingsToClients(BulletPhysics.Settings)
+else
+    net.Receive("NetworkBulletPhysicsSettings", function()
+        local Settings = net.ReadTable()
+
+        BulletPhysics.Settings = Settings
+        print("Bullet Physics: Updated Client settings")
+    end)
+end
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+
+local function IsCurrentWeaponDetoured(Player)
+    if Player:IsPlayer() then
+        local CurrentWeapon = Player:GetActiveWeapon()
+        if CurrentWeapon:IsValid() then
+            return not BulletPhysics.Settings.DetouredWeapons[CurrentWeapon:GetClass()]
+        end
+    end
+    return false
+end
 
 -- Network bullets created by global managers
 local function OnCreateProjectile(self, BulletInfo)
@@ -36,6 +74,8 @@ local function OnCreateProjectile(self, BulletInfo)
     net.Start(HookIndentifier .. "NetworkBullets", true)
         net.WriteEntity(BulletInfo.Attacker)
         net.WriteFloat(BulletInfo.HullSize)
+        net.WriteFloat(BulletInfo.Speed or 20000)
+        net.WriteFloat(BulletInfo.Gravity or 1000)
         net.WriteFloat(BulletInfo.Dir[1])
         net.WriteFloat(BulletInfo.Dir[2])
         net.WriteFloat(BulletInfo.Dir[3])
@@ -53,15 +93,12 @@ local function AssignManager(Player)
         BulletPhysicsProjectileSystem:RemoveManager(PlayerManager)
         Player:RemoveProjectileManager()
     end
-
     local NewManager = BulletPhysicsProjectileSystem:NewManager()
 
-    -- Make the manager unpredicted (Testing if the code actually works before tackling prediction)
-    // trying to tackle prediction might fail
+    -- Make the manager predicted
     NewManager:EnablePrediction()
 
     NewManager:AttachToPlayer(Player)
-
     -- Network bullets to other players
     if SERVER then
         NewManager.OnCreateProjectile = OnCreateProjectile
@@ -74,7 +111,12 @@ if SERVER then
     -- Network string for sending bullets to clients
     util.AddNetworkString(HookIndentifier .. "NetworkBullets")
     -- Assign a manager to players that join the game
-    hook.Add("PlayerInitialSpawn", HookIndentifier .. "PlayerSpawned", AssignManager)
+    hook.Add("PlayerInitialSpawn", HookIndentifier .. "PlayerSpawned", function(Player)
+        AssignManager(Player)
+
+        -- Network settings to new players
+        NetworkSettingsToClients(BulletPhysics.Settings)
+    end)
 
     -- Allow for lua refresh
     local PlayerCount = player_GetCount()
@@ -94,7 +136,6 @@ if CLIENT then
         AssignManager(LocalPlayer())
         _G.BulletPhysicsClientInitialized = true
     end)
-
     if _G.BulletPhysicsClientInitialized then
         AssignManager(LocalPlayer())
     end
@@ -108,9 +149,19 @@ if CLIENT then
 
         BulletInfo.Attacker = net.ReadEntity()
         BulletInfo.HullSize = net.ReadFloat()
+        local Speed = net.ReadFloat()
+        local Gravity = net.ReadFloat()
         BulletInfo.Dir = Vector(net.ReadFloat(), net.ReadFloat(), net.ReadFloat())
         BulletInfo.Src = Vector(net.ReadFloat(), net.ReadFloat(), net.ReadFloat())
 
+        if game.SinglePlayer() then
+            BulletInfo.Settings = {
+                Speed = Speed or BulletPhysics.Settings.Projectiles.DefaultSpeed,
+                Gravity = Gravity or BulletPhysics.Settings.Projectiles.Gravity,
+                ShouldBounce = BulletPhysics.Settings.Projectiles.ShouldBounce,
+                EnableSounds = BulletPhysics.Settings.Projectiles.EnableSounds
+            }
+        end
 
         local Manager = BulletPhysicsProjectileSystem:GetGlobalManager()
         local Projectile = Manager:CreateProjectile(BulletInfo)
@@ -145,7 +196,15 @@ end)
 
 -- Detours the FireBullets function
 EntityMeta = FindMetaTable("Entity")
+EntityMeta._FireBullets = EntityMeta._FireBullets or EntityMeta.FireBullets
 function EntityMeta:FireBullets(BulletInfo)
+    -- Checks if the weapon is detoured in the settings
+    if IsCurrentWeaponDetoured(self) then
+        BulletInfo.TracerName = "Projectile"
+        self:_FireBullets(BulletInfo)
+        return
+    end
+
     -- Localize BulletInfo to prevent editing of the table outside the function
     local BulletInfo = table.Copy(BulletInfo)
 
@@ -155,8 +214,22 @@ function EntityMeta:FireBullets(BulletInfo)
     -- Remove callback function
     BulletInfo.Callback = nil
 
-    -- Move the bullet forward so it doesnt start inside the player's face (Looks better and also fixed a bug).
+    -- Track which bullets are which
+    BulletInfo.TracerName = "Projectile"
     
+    local Settings = {
+        Speed = BulletPhysics.Settings.Projectiles.DefaultSpeed,
+        Gravity = BulletPhysics.Settings.Projectiles.Gravity,
+        ShouldBounce = BulletPhysics.Settings.Projectiles.ShouldBounce,
+        EnableSounds = BulletPhysics.Settings.Projectiles.EnableSounds
+    }
+    if BulletInfo.Settings then
+        Settings.Speed = BulletInfo.Settings.Speed
+        Settings.Gravity = BulletInfo.Settings.Gravity
+    end
+    BulletInfo.Settings = Settings
+    
+    -- Shoot many bullets
     local Num = BulletInfo.Num or 1
     for NumBullets = 1, Num do
         -- Save bullet.dir for later so we can revert back after
@@ -182,6 +255,9 @@ end
 
 -- Override bullets from engine weapons
 hook.Add("PostEntityFireBullets", HookIndentifier .. "FireBullets", function(Entity, BulletInfo)
+    -- Dont override our bullets
+    if BulletInfo.TracerName == "Projectile" then return true end
+
     local BulletInfo = BulletInfo
 
     local Trace = BulletInfo.Trace
@@ -196,7 +272,6 @@ hook.Add("PostEntityFireBullets", HookIndentifier .. "FireBullets", function(Ent
 end)
 
 
-
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
 -- Rendering
@@ -206,36 +281,47 @@ if CLIENT then
 
         -- Interpolate local bullets
         local Manager = LocalPlayer():GetProjectileManager()
-        Manager:InterpolateProjectilePositions()
+        if Manager then
+            Manager:InterpolateProjectilePositions()
+        end
 
         -- Interpolate global bullets
         local Manager = BulletPhysicsProjectileSystem:GetGlobalManager()
-        Manager:InterpolateProjectilePositions()
+        if Manager then
+            Manager:InterpolateProjectilePositions()
+        end
     end)
 
     hook.Add("Think", HookIndentifier .. "BulletFlyby", function()
         -- Interpolate local bullets
         local Manager = LocalPlayer():GetProjectileManager()
-        Manager:CrackProjectiles()
+        if Manager then
+            Manager:CrackProjectiles()
+        end
 
         -- Interpolate global bullets
         local Manager = BulletPhysicsProjectileSystem:GetGlobalManager()
-        Manager:CrackProjectiles()
+        if Manager then
+            Manager:CrackProjectiles()
+        end
     end)
 
     hook.Add("PostDrawOpaqueRenderables", HookIndentifier .. "ProjectileRender", function()
         -- Render localplayer's bullets
         local Manager = LocalPlayer():GetProjectileManager()
-        Manager:RenderProjectiles()
+        if Manager then
+            Manager:RenderProjectiles()
+        end
 
         -- Render global bullets
         local Manager = BulletPhysicsProjectileSystem:GetGlobalManager()
-        Manager:RenderProjectiles()
+        if Manager then
+            Manager:RenderProjectiles()
+        end
     end)
 end
 
 BulletPhysics.AmmoTypeCache = {}
-
 function BulletPhysics:GetAmmoTypeDamage(AmmoID)
     -- Attempt to return a cached value first.
     if self.AmmoTypeCache[AmmoID] then return self.AmmoTypeCache[AmmoID] end

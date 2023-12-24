@@ -136,7 +136,7 @@ function C_LagCompensationManager:EndLagCompensation()
 end
 
 function C_LagCompensationManager:AskForInterp(Ply)
-    net.Start(BulletPhysics.HookIdentifier .. "LagCompInterp")
+    net.Start("LagCompensationInterpConvars")
     net.Send(Ply)
 end
 
@@ -165,9 +165,9 @@ end
 
 if SERVER then
     -- Network string for sending bullets to clients
-    util.AddNetworkString(BulletPhysics.HookIdentifier .. "LagCompInterp")
+    util.AddNetworkString("LagCompensationInterpConvars")
 
-    hook.Add("Tick", BulletPhysics.HookIdentifier .. "LagComensationHitboxStates", function()
+    hook.Add("Tick", "LagComensationHitboxStates", function()
         local PlayerCount = player_GetCount()
         local Players = player_GetAll()
 
@@ -177,7 +177,7 @@ if SERVER then
         end
     end)
 
-    net.Receive(BulletPhysics.HookIdentifier .. "LagCompInterp", function(_, ply)
+    net.Receive("LagCompensationInterpConvars", function(_, ply)
         local cl_interp = net.ReadFloat()
         local cl_interp_ratio = net.ReadFloat()
         local cl_updaterate = net.ReadFloat()
@@ -189,7 +189,7 @@ if SERVER then
         ply.Interps.cl_updaterate = cl_updaterate
     end)
 
-    hook.Add("PlayerInitialSpawn", BulletPhysics.HookIdentifier .. "LagComensationGetInterps", function(Player)
+    hook.Add("PlayerInitialSpawn", "LagComensationGetInterps", function(Player)
         C_LagCompensationManager:AskForInterp(Player)
     end)
 
@@ -202,11 +202,11 @@ if SERVER then
 end
 
 if CLIENT then
-    net.Receive(BulletPhysics.HookIdentifier .. "LagCompInterp", function()
+    net.Receive("LagCompensationInterpConvars", function()
         local cl_interp = GetConVar("cl_interp"):GetFloat()
         local cl_interp_ratio = GetConVar("cl_interp_ratio"):GetFloat()
         local cl_updaterate = GetConVar("cl_updaterate"):GetInt()
-        net.Start(BulletPhysics.HookIdentifier .. "LagCompInterp")
+        net.Start("LagCompensationInterpConvars")
             net.WriteFloat(cl_interp)
             net.WriteFloat(cl_interp_ratio)
             net.WriteFloat(cl_updaterate)
