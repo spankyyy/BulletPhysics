@@ -8,6 +8,7 @@ _G.ProjectileInfo = ProjectileInfo
 local ImpactDamage = DamageInfo()
 local ImpactEffect = EffectData()
 local BounceEffect = EffectData()
+local SplashEffect = EffectData()
 
 local BounceOn = {
     [MAT_CONCRETE]    = true,
@@ -352,6 +353,7 @@ function ProjectileInfo:Simulate()
         self.MoveTrace.Hit = false
     end
 
+
     -- Apply gravity
     local Gravity = Vector(0, 0, -Settings.Gravity) * UpdateRate
     self.Velocity = self.Velocity + Gravity
@@ -359,6 +361,69 @@ function ProjectileInfo:Simulate()
     self.TimeAtLastSimulation = UnPredictedCurTime()
     self.First = self.TickLifetime < 1
     self.TickLifetime = self.TickLifetime + 1
+
+    self:OnSimulate()
+    self:SimulateWaterDrag()
+end
+
+local function PointContents(Pos, Content)
+    return bit.band(util.PointContents(Pos), Content) == Content
+end
+
+local function BubbleTrail(Start, End, Count)
+    for i=0, Count-1 do
+        local Delta = (Count == 1) and 0.5 or i / (Count-1)
+        local InterpolatedPosition = LerpVector(Delta, Start, End)
+
+        effects.Bubbles(InterpolatedPosition + Vector(-6, -6, -6), InterpolatedPosition + Vector(6, 6, 6), 2, math.random() * 32, 64, 0)
+    end
+end
+
+function ProjectileInfo:SimulateWaterDrag()
+    local SpeedLoss = 0.5
+
+    local MoveTrace = self.MoveTrace
+    local InWater = PointContents(MoveTrace.StartPos, CONTENTS_WATER) or PointContents(MoveTrace.StartPos, CONTENTS_TRANSLUCENT)
+
+    if InWater then
+        local VelocityLength = self.Velocity:Length()
+        self.Velocity = self.Velocity - (self.Velocity * SpeedLoss)
+        if VelocityLength < 100 then
+            self:Delete()
+        end
+
+        if VelocityLength > 2000 then
+            local Normalized = VelocityLength * 0.0005
+            BubbleTrail(MoveTrace.StartPos, MoveTrace.HitPos, 8)
+        end
+    end
+end
+
+function ProjectileInfo:OnSimulate()
+    -- Do splash effects
+    local MoveTrace = self.MoveTrace
+
+    local InWater = PointContents(MoveTrace.HitPos, CONTENTS_WATER) or PointContents(MoveTrace.HitPos, CONTENTS_TRANSLUCENT)
+    if InWater and CLIENT then
+        local WaterTrace = {}
+        util.TraceLine({
+            start = self.LastPosition,
+            endpos = MoveTrace.HitPos,
+            filter = self.Attacker,
+            mask = MASK_WATER,
+            output = WaterTrace
+        })
+
+        if WaterTrace.Hit and not WaterTrace.StartSolid then
+            -- Setup splash effect
+            SplashEffect:SetOrigin(WaterTrace.HitPos)
+            SplashEffect:SetScale(6)
+
+            -- Apply effect
+            util.Effect("gunshotsplash", SplashEffect)
+            util.Effect("waterripple", SplashEffect)
+        end
+    end
 end
 
 function ProjectileInfo:OnHit()
@@ -461,6 +526,9 @@ if CLIENT then
     function ProjectileInfo:Crack()
         if not self.Settings.EnableSounds then return end
 
+        local LocalVelocity = self.Velocity - LocalPlayer():GetVelocity()
+        local LocalSpeed = LocalVelocity:Length()
+
         local Eyepos = EyePos()
 
         if self.Position:DistToSqr(Eyepos) > 1500^2 then return end
@@ -475,7 +543,7 @@ if CLIENT then
             {400, "sonic_Crack.Heavy", 1 - ((DistanceToLine / 400) * 0.5)},
             {1200, "sonic_Crack.Medium", 1 - (DistanceToLine / 1200)}
         }
-        if not self.First and Fraction < 1 then
+        if not self.First and Fraction < 1 and LocalSpeed > 10000 then
             for i=1, #Distances do
                 local TheFuck = Distances[i]
                 if DistanceToLine < TheFuck[1] then
@@ -614,6 +682,8 @@ if SERVER then
             local TargetTick = Projectile:GetTickCount() + Projectile:GetSimulationTick() - 1
             C_LagCompensationManager:BacktrackTo(TargetTick)
             Projectile:Simulate()
+
+            if table.IsEmpty(Projectile) then continue end
             
             C_HitboxSystem:QueryRaycast(Projectile.MoveTrace, function()
                 Projectile:OnHit()
@@ -627,7 +697,10 @@ else
         if not IsFirstTimePredicted() then return end
     
         for _, Projectile in next, self:GetProjectiles() do
+
             Projectile:Simulate()
+
+            if table.IsEmpty(Projectile) then continue end
             
             if Projectile.MoveTrace.Hit then
                 Projectile:OnHit()
@@ -640,7 +713,10 @@ end
 function C_ProjectileManager:OnSetupMoveUnpredicted()
     if self:GetPrediction() then return end
     for _, Projectile in next, self:GetProjectiles() do
+
         Projectile:Simulate()
+
+        if table.IsEmpty(Projectile) then continue end
 
         if Projectile.MoveTrace.Hit then
             Projectile:OnHit()

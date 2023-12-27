@@ -5,7 +5,10 @@ include("systems/c_lagcompensationmanager.lua")
 include("systems/c_projectilemanager.lua")
 include("systems/c_projectilesystem.lua")
 
-include("systems/bulleyphysicssettings.lua")
+include("systems/bulletphysicssettings.lua")
+
+// Utility modules
+local net = include("utility/extranet.lua")
 
 local BulletPhysics = {}
 _G.BulletPhysics = BulletPhysics
@@ -21,16 +24,6 @@ local function Fallback(tbl, index, fallback)
     if tbl[index] == nil then
         tbl[index] = fallback
     end
-end
-
-function net.WriteVectorFloat(Vec)
-    net.WriteFloat(Vec[1])
-    net.WriteFloat(Vec[2])
-    net.WriteFloat(Vec[3])
-end
-
-function net.ReadVectorFloat()
-    return Vector(net.ReadFloat(), net.ReadFloat(), net.ReadFloat())
 end
 
 -- Hook name
@@ -50,15 +43,6 @@ BulletPhysics.ProjectileSystem = BulletPhysicsProjectileSystem
 local function OnCreateProjectile(self, BulletInfo)
     local BulletInfo = BulletInfo
 
-    local Players = RecipientFilter(true)
-    Players:AddAllPlayers()
-    if BulletInfo.Attacker:IsPlayer() and not game.SinglePlayer() then
-        Players:RemovePlayer(BulletInfo.Attacker)
-    end
-
-    -- Dont run if theres no players to send a message to
-    if Players:GetCount() == 0 then return end
-
     Fallback(BulletInfo, "Settings", {})
 
     local ConvarSettings = BulletPhysicsGetConvars()
@@ -77,7 +61,7 @@ local function OnCreateProjectile(self, BulletInfo)
         net.WriteBool(BulletInfo.Settings.EnableSounds)
         net.WriteVectorFloat(BulletInfo.Dir)
         net.WriteVectorFloat(BulletInfo.Src)
-    net.Send(Players)
+    net.OmitBroad(BulletInfo.Attacker)
 end
 
 -- Create a manager for the player
