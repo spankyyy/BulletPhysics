@@ -1,13 +1,13 @@
 if SERVER then return end
-local VersionNumber = 1
+local VersionNumber = 4
+local Changelog = [[(1) Adjusted bullet visibility/rendering.
 
-local Changelog = [[(1) Added settings menu,
-    Command: (bulletphysics_menu)
+(2) Adjusted lag compensation.
 
-(2) Fixed some impact particles not 
-showing up.
-
-(3) Fixed explosive props not exploding.]]
+(3) Temporary fix for damage with ArcCW and Arc9 
+    (Damage will always be 10)
+    
+(4) Fixed version file not saving correctly.]]
 
 
 function markup.EZParse(text, color, optionalFont)
@@ -51,6 +51,7 @@ surface.CreateFont( "Changelogs", {
     additive = false,
     outline = false,
 } )
+
 local function CreateChangelogMenu()
     local size = {256, 192}
     local ChangelogPopup = vgui.Create("DFrame")
@@ -90,8 +91,15 @@ local function CreateChangelogMenu()
     ChangelogPanel:Dock(FILL)
 end
 
-timer.Simple(0, function()
+timer.Simple(2, function()
     -- If it doesnt exist, create it and open popup
+    if not file.Exists("bulletphysics", "DATA") then
+        file.CreateDir("bulletphysics")
+        file.Write("bulletphysics/version.txt", tostring(VersionNumber))
+
+        CreateChangelogMenu()
+    end
+
     if not file.Exists("bulletphysics/version.txt", "DATA") then
         file.Write("bulletphysics/version.txt", tostring(VersionNumber))
 

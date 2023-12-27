@@ -121,8 +121,8 @@ end
 function C_LagCompensationManager:BacktrackTo(TargetTick)
     if not self.CompensationInProgress then return end
 
-    local Interp = math.floor(0.5 + (self:GetInterpolationAmount() / engine.TickInterval()))
-    self.CompensationTarget = TargetTick - Interp
+    local Interp = math.floor(0.5 + (self:GetInterpolationAmount() / engine.TickInterval() * 1.5))
+    self.CompensationTarget = TargetTick - math.Round(Interp * 0.5)
 end
 
 function C_LagCompensationManager:StartLagCompensation(Ply)
@@ -193,9 +193,19 @@ if SERVER then
         C_LagCompensationManager:AskForInterp(Player)
     end)
 
+
+    -- ask for interp every 10 seconds
+    timer.Create("LagComensationGetInterps", 10, 0, function()
+        local PlayerCount = player_GetCount()
+        local Players = player_GetAll()
+
+        for i = 1, PlayerCount do
+            C_LagCompensationManager:AskForInterp(Players[i])
+        end
+    end)
+
     local PlayerCount = player_GetCount()
     local Players = player_GetAll()
-
     for i = 1, PlayerCount do
         C_LagCompensationManager:AskForInterp(Players[i])
     end

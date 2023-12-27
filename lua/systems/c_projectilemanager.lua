@@ -9,6 +9,25 @@ local ImpactDamage = DamageInfo()
 local ImpactEffect = EffectData()
 local BounceEffect = EffectData()
 
+local BounceOn = {
+    [MAT_CONCRETE]    = true,
+    [MAT_TILE]        = true,
+    [MAT_PLASTIC]     = true,
+    [MAT_SAND]        = false,
+    [MAT_SNOW]        = false,
+    [MAT_DIRT]        = true,
+    [MAT_GRASS]       = false,
+    [MAT_GLASS]       = true,
+    [MAT_WOOD]        = true,
+    [MAT_FLESH]       = false,
+    [MAT_BLOODYFLESH] = false,
+    [MAT_ALIENFLESH]  = false,
+    [MAT_ANTLION]     = false,
+    [MAT_METAL]       = true,
+    [MAT_COMPUTER]    = true,
+    [MAT_VENT]        = true
+}
+
 // Functions
 
 function util.DistanceToLineFrac(Start, End, Point)
@@ -20,7 +39,7 @@ function util.DistanceToLineFrac(Start, End, Point)
     return DistToLine, Nearest, Fraction
 end
 
-function Spread(Normal, Degrees, Seed, Extra)
+local function Spread(Normal, Degrees, Seed, Extra)
     Extra = Extra-1 or 0
     local correctDegrees = 1 - math.cos(math.rad(Degrees))
     local u = util.SharedRandom(Seed, 0, correctDegrees, Extra)
@@ -32,6 +51,23 @@ function Spread(Normal, Degrees, Seed, Extra)
     local Final = Vector(cosTheta, math.cos(math.deg(phi)) * sinTheta, math.sin(math.deg(phi)) * sinTheta)
     Final:Rotate(Normal:Angle())
     return Final
+end
+
+local function Reflect(incident, normal)
+    return incident - 2 * (incident:Dot(normal)) * normal
+end
+
+local function Squash(vec, planeNormal, scalar)
+    return vec - (planeNormal * planeNormal:Dot(vec) * scalar)
+end
+
+local function Fallback(tbl, index, fallback)
+    if not tbl then return end
+    if not index then return end
+
+    if tbl[index] == nil then
+        tbl[index] = fallback
+    end
 end
 
 
@@ -76,8 +112,9 @@ function ProjectileInfo:New()
     self.First = true
     self.TimeSinceLastSimulation = 0
     self.TickLifetime = 0
-    self.ShouldFireBulletOnHit = true
+    self.TicksSinceLastBounce = 0
     self.Cracked = false
+    self.AwaitingNextHit = false
 
     -- Variables for the managers
     self.Manager = nil
@@ -91,21 +128,32 @@ function ProjectileInfo:Setup(BulletInfo)
     for k,v in pairs(BulletInfo) do
         self.BulletInfo[k] = v
     end
-
-    if self.BulletInfo.Damage == 0 and self.BulletInfo.AmmoType ~= "" then
-        self.AmmoID = game.GetAmmoID(self.BulletInfo.AmmoType)
+    
+    local Damage, AmmoType = self.BulletInfo.Damage, self.BulletInfo.AmmoType
+    if Damage == 0 and (AmmoType ~= "" and AmmoType ~= nil) then
+        self.AmmoID = game.GetAmmoID(AmmoType)
+    elseif Damage == 0 and (AmmoType == nil or AmmoType == "") then
+        self.BulletInfo.Damage = 10
     end
+
+    self.Settings = self.BulletInfo.Settings or {}
+    self.BulletInfo.Settings = nil
+
+    Fallback(self.Settings, "Speed", 20000)
+    Fallback(self.Settings, "Gravity", 1000)
+    Fallback(self.Settings, "MaxBounceAngle", 0.3)
+    Fallback(self.Settings, "ShouldBounce", true)
+    Fallback(self.Settings, "EnableSounds", true)
+
 
     self.BulletInfo.Spread = nil
     self.Position = BulletInfo.Src
     self.InterpolatedPosition = self.Position
     self.TimeAtLastSimulation = UnPredictedCurTime()
     self.LastPosition = self.Position
-    self.Velocity = BulletInfo.Dir * (BulletInfo.Speed or 20000)
+    self.Velocity = BulletInfo.Dir * self.Settings.Speed
     self.Forward = self.Velocity:GetNormalized()
     self.Attacker = BulletInfo.Attacker
-    self.Bounced = false
-    self.MaxBounceAngle = 0.3
 end
 
 function ProjectileInfo:CalculateSpread(BulletInfo, Seed, Extra)
@@ -140,19 +188,31 @@ function ProjectileInfo:Delete()
 end
 
 function ProjectileInfo:InterpolatePositions()
+    if self.AwaitingNextHit then
+        self.InterpolatedPosition = self.Position
+        return
+    end
+    
     local TimePassed = math.Clamp((UnPredictedCurTime() - self.TimeAtLastSimulation) / engine.TickInterval(), 0, 1)
 
     self.InterpolatedPosition = LerpVector(TimePassed, self.LastPosition, self.Position)
 end
 
+
+local _AmmoTypeCache = {}
+function GetAmmoTypeDamage(AmmoID)
+    -- Attempt to return a cached value first.
+    if _AmmoTypeCache[AmmoID] then return _AmmoTypeCache[AmmoID] end
+    -- Set the cached variable for appropriate ammo type.
+    _AmmoTypeCache[AmmoID] = game.GetAmmoPlayerDamage(AmmoID)
+
+    return _AmmoTypeCache[AmmoID]
+end
+
 function ProjectileInfo:CalculateDamage(Entity)
-    if not self.AmmoID then return self.BulletInfo.Damage end
+    if not self.AmmoID or self.AmmoID == "" then return self.BulletInfo.Damage end
 
-    local Damage = 0
-
-    if Entity:IsPlayer() or Entity:IsNPC() then
-        Damage = BulletPhysics:GetAmmoTypeDamage(self.AmmoID)
-    end
+    local Damage = GetAmmoTypeDamage(self.AmmoID)
 
     return Damage
 end
@@ -161,7 +221,7 @@ function ProjectileInfo:FireBullet()
     if not self.MoveTrace.Hit then return end
 
     local HitEntity = self.MoveTrace.Entity
-    if HitEntity and HitEntity:IsValid() and HitEntity ~= self.Attacker and SERVER then
+    if HitEntity and HitEntity:IsValid() and HitEntity ~= self.Attacker then
         local CalculatedDamage = self:CalculateDamage(HitEntity)
 
         local Attacker = self.Attacker
@@ -174,26 +234,39 @@ function ProjectileInfo:FireBullet()
         end
 
         -- Setup damage
-        ImpactDamage:SetDamageType(DMG_BUCKSHOT)
-        ImpactDamage:SetAmmoType(self.AmmoID or 0)
+        local ImpactDamage = DamageInfo()
+        ImpactDamage:SetDamageType(DMG_BULLET)
         ImpactDamage:SetDamage(CalculatedDamage)
-        ImpactDamage:SetDamageForce(self.Forward * self.BulletInfo.Force)
+        --ImpactDamage:SetDamageForce(self.Forward * self.BulletInfo.Force)
         ImpactDamage:SetAttacker(Attacker)
         ImpactDamage:SetInflictor(Inflictor)
-        ImpactDamage:SetReportedPosition(self.MoveTrace.HitPos - self.MoveTrace.Normal)
+        ImpactDamage:SetReportedPosition(self.MoveTrace.HitPos)
+
+        -- Apply Force
+        if SERVER then
+            local Phys = HitEntity:GetPhysicsObjectNum(self.MoveTrace.PhysicsBone)
+
+            if not Phys or not Phys:IsValid() then
+                ImpactDamage:SetDamageForce((self.Forward * self.BulletInfo.Force * 1500) + Vector(0, 0, 500))
+            else
+                ImpactDamage:SetDamageForce(Vector(0, 0, 0))
+                Phys:ApplyForceOffset(self.Forward * self.BulletInfo.Force * 300, self.MoveTrace.HitPos)
+            end
+        end
 
         -- Apply damage to entity
-        HitEntity:DispatchTraceAttack(ImpactDamage, self.MoveTrace, self.MoveTrace.HitNormal )
+        HitEntity:DispatchTraceAttack(ImpactDamage, self.MoveTrace, self.Forward)
     end
 
     if not self.Manager:GetPrediction() or CLIENT then
         -- Setup impact effect
-        ImpactEffect:SetDamageType(DMG_BUCKSHOT)
+        ImpactEffect:SetDamageType(DMG_BULLET)
         ImpactEffect:SetEntity(HitEntity)
-        ImpactEffect:SetOrigin(self.MoveTrace.HitPos)
+        ImpactEffect:SetOrigin(self.MoveTrace.HitPos + self.MoveTrace.Normal)
         ImpactEffect:SetStart(self.Position - self.MoveTrace.Normal * 4)
         ImpactEffect:SetSurfaceProp(self.MoveTrace.SurfaceProps)
         ImpactEffect:SetHitBox(self.MoveTrace.HitBox)
+        ImpactEffect:SetNormal(self.MoveTrace.HitNormal)
 
         -- Apply effect
         util.Effect("Impact", ImpactEffect)
@@ -205,15 +278,15 @@ function ProjectileInfo:FireBullet()
     //end
 end
 
-local function Reflect(incident, normal)
-    return incident - 2 * (incident:Dot(normal)) * normal
-end
+function ProjectileInfo:ShouldBounce()
+    if not BounceOn[self.MoveTrace.MatType] then
+        return false
+    end
 
-local function Squash(vec, planeNormal, scalar)
-    return vec - (planeNormal * planeNormal:Dot(vec) * scalar)
-end
+    if self.Velocity:LengthSqr() < (1000 ^ 2) then
+        return false
+    end
 
-local function ShouldReflect(self)
     if self.MoveTrace.Entity and self.MoveTrace.Entity:IsValid() then
         local EntityClass = self.MoveTrace.Entity:GetClass()
         if not (EntityClass == "prop_physics" or EntityClass == "worldspawn") then return false end
@@ -221,12 +294,11 @@ local function ShouldReflect(self)
 
 
     local Dot = self.MoveTrace.HitNormal:Dot(-self.Forward:GetNormalized())
-    return (Dot < self.MaxBounceAngle) and (self.MoveTrace.Fraction ~= 0)
+    return (Dot < self.Settings.MaxBounceAngle) and (self.MoveTrace.Fraction ~= 0)
 end
 
 function ProjectileInfo:Simulate()
-    //print("Projectile ID:" .. self.Index .. " got simulated.")
-    local Settings = self.BulletInfo.Settings
+    local Settings = self.Settings
     local UpdateRate = engine.TickInterval()
     
     local Velocity = self.Velocity
@@ -244,13 +316,16 @@ function ProjectileInfo:Simulate()
     self.Forward = Velocity:GetNormalized()
 
     -- Bounce
+    self.TicksSinceLastBounce = self.TicksSinceLastBounce + 1
     if self.MoveTrace.Hit and Settings.ShouldBounce then
         local Fraction = (1 - self.MoveTrace.Fraction)
         local Hit = false
+        local LastVelocity = Velocity
         for i=1, 16 do
-            if not ShouldReflect(self) then break end
+            if not self:ShouldBounce() then break end
 
             self:OnBounce()
+            LastVelocity = self.Velocity
 
             if not self.MoveTrace.Hit then break end
 
@@ -261,19 +336,24 @@ function ProjectileInfo:Simulate()
                 mask = MASK_SHOT,
                 output = self.MoveTrace
             })
-            self.LastPosition = self.Position
             self.Position = self.MoveTrace.HitPos
+            self.LastPosition = self.Position
 
             Fraction = Fraction - self.MoveTrace.Fraction
 
             if Fraction <= 0 then break end
             self.MoveTrace.Hit = false
         end
-        self.Forward = Velocity:GetNormalized()
+        self.Forward = LastVelocity:GetNormalized()
+    end
+    
+    if self.MoveTrace.Hit and not self.AwaitingNextHit then
+        self.AwaitingNextHit = true
+        self.MoveTrace.Hit = false
     end
 
     -- Apply gravity
-    local Gravity = Vector(0, 0, -(self.BulletInfo.Gravity or 1000)) * UpdateRate
+    local Gravity = Vector(0, 0, -Settings.Gravity) * UpdateRate
     self.Velocity = self.Velocity + Gravity
 
     self.TimeAtLastSimulation = UnPredictedCurTime()
@@ -282,47 +362,48 @@ function ProjectileInfo:Simulate()
 end
 
 function ProjectileInfo:OnHit()
+    -- Dont do anything if the bullet hit the sky
     if self.MoveTrace.HitSky then 
         self:Delete()
         return
     end
 
-    local BulletInfo = self.BulletInfo
-
+    -- Dont do anything if the attacker is no longer valid 
     if not self.Attacker or not self.Attacker:IsValid() then
         self:Delete()
         return
     end
 
-    if self.ShouldFireBulletOnHit or true then
-        self:FireBullet()
-
-        if CLIENT and self.BulletInfo.Settings.EnableSounds then
-            EmitSound("sonic_Crack.Distant", self.MoveTrace.HitPos, 0, CHAN_STATIC, 5, 160, 0, 150, 0)
-        end
+    -- Impact sounds
+    if CLIENT and self.Settings.EnableSounds and BounceOn[self.MoveTrace.MatType] then
+        EmitSound("sonic_Crack.Distant", self.MoveTrace.HitPos, 0, CHAN_STATIC, 5, 160, 0, 150, 0)
     end
+
+    -- Fire the bullet
+    self:FireBullet()
 
     -- Delete the projectile
     self:Delete()
 end
 
 function ProjectileInfo:OnBounce()
-    local SpeedLoss = 1--1 - (self.MoveTrace.HitNormal:Dot(-self.Forward))
+    local SpeedLoss = 0.75--1 - (self.MoveTrace.HitNormal:Dot(-self.Forward))
 
     
 
     self.Velocity = Reflect(self.Velocity, self.MoveTrace.HitNormal) * SpeedLoss
-    self.Bounced = true
     self.Cracked = false
+    self.TicksSinceLastBounce = 0
 
+    local HalfNormal = (self.Forward + self.MoveTrace.HitNormal):GetNormalized()
     BounceEffect:SetOrigin(self.Position)
-    BounceEffect:SetNormal(self.Forward)
+    BounceEffect:SetNormal(HalfNormal)
     BounceEffect:SetMagnitude(1)
     BounceEffect:SetScale(1)
     util.Effect( "ElectricSpark", BounceEffect)
 
     -- Play bounce sound
-    if CLIENT then
+    if CLIENT and self.Settings.EnableSounds then
         EmitSound("sonic_Crack.Distant", self.MoveTrace.HitPos, 0, CHAN_STATIC, 5, 160, 0, 255, 0)
     end
 end
@@ -330,63 +411,56 @@ end
 if CLIENT then
     // Rendering
 
-    local function ClientModel(Data)
-        if Data.Entity and Data.Entity:isValid() then
-            GhostEntity:SetModel(Data.Model)
-            return GhostEntity
-        end
-        GhostEntity = ClientsideModel(Data.Model)
-        GhostEntity:SetNoDraw(true)
-        GhostEntity:SetPos(Data.Position)
-        GhostEntity:SetAngles(Data.Angle)
-        GhostEntity:SetRenderMode(RENDERMODE_TRANSALPHA)
-        return GhostEntity
-    end
-
-    local BulletModel = ClientModel({
-        Model = "models/hunter/misc/sphere025x025.mdl",
-        Position = Vector(0, 0, 0),
-        Angle = Angle(0, 0, 0)
-    })
-    BulletModel:SetMaterial("lights/white")
-
     local GlowEffect = Material("sprites/orangecore2")
     local Tracer = Material("effects/tracer_middle")
-    local LightsWhite = Material("lights/white")
-    local ScaleMatrix = Matrix()
 
-
+    local r = 4
+    local Quad = {Vector(0, r, r), Vector(0, r, -r), Vector(0, -r, -r), Vector(0, -r, r)}
     function ProjectileInfo:Render()
-        local RenderTick = 1
-        if self.TickLifetime > RenderTick and not self.Bounced then
-            -- Main shape
-            render.SetMaterial(GlowEffect)
-            render.DrawBeam(self.InterpolatedPosition - self.Forward * 32, self.InterpolatedPosition + self.Forward * 32, 6, 0, 1)
+        local BulletSpeed = self.Velocity:Length() * engine.TickInterval()
+        local IsAttackerPlayer = self.Attacker == LocalPlayer()
 
-            -- Bullet
-            ScaleMatrix:SetScale(Vector(4, 0.1, 0.1))
-            BulletModel:EnableMatrix("RenderMultiply", ScaleMatrix)
-            BulletModel:SetPos(self.InterpolatedPosition)
-            BulletModel:SetAngles(self.Forward:Angle())
-            BulletModel:SetupBones()
-
-            local BulletColor = LerpVector(0.85, Vector(1, 0.5, 0), Vector(1, 1, 1))
-            render.SetColorModulation(BulletColor[1], BulletColor[2], BulletColor[3])
-            BulletModel:DrawModel()
-            render.SetColorModulation(1, 1, 1)
+        local RenderTick = 3
+        if self.TicksSinceLastBounce > RenderTick or not IsAttackerPlayer then
 
             -- Tracer
             render.SetMaterial(Tracer)
-            if self.TickLifetime < (RenderTick - 1) then
-                render.DrawBeam(self.InterpolatedPosition, self.LastPosition, 6, 0, 1)
+            if self.TicksSinceLastBounce < (RenderTick - 1) then
+                render.DrawBeam(self.InterpolatedPosition, self.LastPosition, 3, 0, 1)
             else
-                render.DrawBeam(self.InterpolatedPosition, self.InterpolatedPosition - self.Forward * 256, 6, 0, 1)
+                render.DrawBeam(self.InterpolatedPosition, self.InterpolatedPosition - self.Forward * BulletSpeed * 1, 3, 0, 1)
             end
+        end
+
+        if self.TicksSinceLastBounce > 1 then
+            local EyePosition = EyePos()
+            local BulletPosition = self.InterpolatedPosition
+            local BulletForward = self.Forward
+            
+            local NewQuad = {}
+            for k, Vert in pairs(Quad) do
+                local Vert = Vector(Vert[1], Vert[2], Vert[3])
+                
+                local DirectionToBullet = (BulletPosition - EyePosition):GetNormalized()
+            
+                Vert:Rotate((-DirectionToBullet):Angle())
+                
+                local DotToBullet = 1 - (math.abs(DirectionToBullet:Dot(BulletForward)) * 0.75)
+
+                Vert = Squash(Vert, BulletForward, -BulletSpeed * 0.05 / DotToBullet)
+                Vert = Squash(Vert, DirectionToBullet, 1)
+            
+                NewQuad[k] = Vert + BulletPosition
+            end
+            render.SetMaterial(GlowEffect)
+            render.DrawQuad(NewQuad[1], NewQuad[2], NewQuad[3], NewQuad[4])
         end
     end
 
     // Sounds
     function ProjectileInfo:Crack()
+        if not self.Settings.EnableSounds then return end
+
         local Eyepos = EyePos()
 
         if self.Position:DistToSqr(Eyepos) > 1500^2 then return end
@@ -499,10 +573,10 @@ function C_ProjectileManager:CreateProjectile(BulletInfo)
         -- Set attacker of the projectile in case it is not set
         --Projectile.BulletInfo.Attacker = AttachedEntity
 
-        if self:GetPrediction() then
+        if self:GetPrediction() and GetPredictionPlayer() == AttachedEntity then
             -- Get the current command
             local CUserCmd = AttachedEntity:GetCurrentCommand()
-            
+
             -- Set the tick at which the bullet was fired (allows for mostly accurate lag compensation)
             if CUserCmd then
                 Projectile:SetTickCount(CUserCmd:TickCount())
@@ -590,9 +664,7 @@ if CLIENT then
 
     function C_ProjectileManager:CrackProjectiles()
         for _, Projectile in next, self:GetProjectiles() do
-            if Projectile.BulletInfo.Settings.EnableSounds then
-                Projectile:Crack()
-            end
+            Projectile:Crack()
         end
     end
 end

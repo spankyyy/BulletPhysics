@@ -4,7 +4,8 @@ include("systems/c_hitboxsystem.lua")
 include("systems/c_lagcompensationmanager.lua")
 include("systems/c_projectilemanager.lua")
 include("systems/c_projectilesystem.lua")
-include("systems/settings.lua")
+
+include("systems/bulleyphysicssettings.lua")
 
 local BulletPhysics = {}
 _G.BulletPhysics = BulletPhysics
@@ -12,6 +13,25 @@ _G.BulletPhysics = BulletPhysics
 -- Cached functions
 local player_GetCount = player.GetCount
 local player_GetAll = player.GetAll
+
+local function Fallback(tbl, index, fallback)
+    if not tbl then return end
+    if not index then return end
+
+    if tbl[index] == nil then
+        tbl[index] = fallback
+    end
+end
+
+function net.WriteVectorFloat(Vec)
+    net.WriteFloat(Vec[1])
+    net.WriteFloat(Vec[2])
+    net.WriteFloat(Vec[3])
+end
+
+function net.ReadVectorFloat()
+    return Vector(net.ReadFloat(), net.ReadFloat(), net.ReadFloat())
+end
 
 -- Hook name
 local HookIndentifier = "BPhys_"
@@ -23,40 +43,8 @@ BulletPhysics.ProjectileSystem = BulletPhysicsProjectileSystem
 
 
 // Settings
-BulletPhysics.Settings = BulletPhysics.Settings or {}
-
-local function NetworkSettingsToClients(Settings)
-    timer.Simple(0, function()
-        net.Start("NetworkBulletPhysicsSettings")
-            net.WriteTable(Settings)
-        net.Broadcast()
-    end)
-end
-
-if SERVER then
-    BulletPhysicsSettings:UpdateSettings()
-    BulletPhysics.Settings = BulletPhysicsSettings:GetSettings()
-    NetworkSettingsToClients(BulletPhysics.Settings)
-else
-    net.Receive("NetworkBulletPhysicsSettings", function()
-        local Settings = net.ReadTable()
-
-        BulletPhysics.Settings = Settings
-        print("Bullet Physics: Updated Client settings")
-    end)
-end
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
-
-local function IsCurrentWeaponDetoured(Player)
-    if Player:IsPlayer() then
-        local CurrentWeapon = Player:GetActiveWeapon()
-        if CurrentWeapon:IsValid() then
-            return not BulletPhysics.Settings.DetouredWeapons[CurrentWeapon:GetClass()]
-        end
-    end
-    return false
-end
 
 -- Network bullets created by global managers
 local function OnCreateProjectile(self, BulletInfo)
@@ -70,18 +58,25 @@ local function OnCreateProjectile(self, BulletInfo)
 
     -- Dont run if theres no players to send a message to
     if Players:GetCount() == 0 then return end
+
+    Fallback(BulletInfo, "Settings", {})
+
+    local ConvarSettings = BulletPhysicsGetConvars()
+    Fallback(BulletInfo.Settings, "Speed", ConvarSettings.Speed:GetInt())
+    Fallback(BulletInfo.Settings, "Gravity", ConvarSettings.Gravity:GetInt())
+    Fallback(BulletInfo.Settings, "EnableSounds", ConvarSettings.EnableSounds:GetBool())
+    Fallback(BulletInfo.Settings, "ShouldBounce", ConvarSettings.ShouldBounce:GetBool())
+
     -- Send messages to players other than attacker
     net.Start(HookIndentifier .. "NetworkBullets", true)
         net.WriteEntity(BulletInfo.Attacker)
         net.WriteFloat(BulletInfo.HullSize)
-        net.WriteFloat(BulletInfo.Speed or 20000)
-        net.WriteFloat(BulletInfo.Gravity or 1000)
-        net.WriteFloat(BulletInfo.Dir[1])
-        net.WriteFloat(BulletInfo.Dir[2])
-        net.WriteFloat(BulletInfo.Dir[3])
-        net.WriteFloat(BulletInfo.Src[1])
-        net.WriteFloat(BulletInfo.Src[2])
-        net.WriteFloat(BulletInfo.Src[3])
+        net.WriteFloat(BulletInfo.Settings.Speed)
+        net.WriteFloat(BulletInfo.Settings.Gravity)
+        net.WriteBool(BulletInfo.Settings.ShouldBounce)
+        net.WriteBool(BulletInfo.Settings.EnableSounds)
+        net.WriteVectorFloat(BulletInfo.Dir)
+        net.WriteVectorFloat(BulletInfo.Src)
     net.Send(Players)
 end
 
@@ -110,12 +105,10 @@ end
 if SERVER then
     -- Network string for sending bullets to clients
     util.AddNetworkString(HookIndentifier .. "NetworkBullets")
-    -- Assign a manager to players that join the game
-    hook.Add("PlayerInitialSpawn", HookIndentifier .. "PlayerSpawned", function(Player)
-        AssignManager(Player)
+    util.AddNetworkString(HookIndentifier .. "ClientReady")
 
-        -- Network settings to new players
-        NetworkSettingsToClients(BulletPhysics.Settings)
+    net.Receive(HookIndentifier .. "ClientReady", function(_, Player)
+        AssignManager(Player)
     end)
 
     -- Allow for lua refresh
@@ -135,7 +128,12 @@ if CLIENT then
     hook.Add("InitPostEntity", HookIndentifier .. "LocalPlayerSpawned", function()
         AssignManager(LocalPlayer())
         _G.BulletPhysicsClientInitialized = true
+
+        net.Start(HookIndentifier .. "ClientReady")
+        net.SendToServer()
     end)
+
+    -- Allow for lua refresh
     if _G.BulletPhysicsClientInitialized then
         AssignManager(LocalPlayer())
     end
@@ -146,22 +144,17 @@ if CLIENT then
     -- Receive bullets from sources other than localplayer
     net.Receive(HookIndentifier .. "NetworkBullets", function()
         local BulletInfo = {}
+        BulletInfo.Settings = {}
 
         BulletInfo.Attacker = net.ReadEntity()
         BulletInfo.HullSize = net.ReadFloat()
-        local Speed = net.ReadFloat()
-        local Gravity = net.ReadFloat()
-        BulletInfo.Dir = Vector(net.ReadFloat(), net.ReadFloat(), net.ReadFloat())
-        BulletInfo.Src = Vector(net.ReadFloat(), net.ReadFloat(), net.ReadFloat())
+        BulletInfo.Settings.Speed = net.ReadFloat()
+        BulletInfo.Settings.Gravity = net.ReadFloat()
+        BulletInfo.Settings.ShouldBounce = net.ReadBool()
+        BulletInfo.Settings.EnableSounds = net.ReadBool()
 
-        if game.SinglePlayer() then
-            BulletInfo.Settings = {
-                Speed = Speed or BulletPhysics.Settings.Projectiles.DefaultSpeed,
-                Gravity = Gravity or BulletPhysics.Settings.Projectiles.Gravity,
-                ShouldBounce = BulletPhysics.Settings.Projectiles.ShouldBounce,
-                EnableSounds = BulletPhysics.Settings.Projectiles.EnableSounds
-            }
-        end
+        BulletInfo.Dir = net.ReadVectorFloat()
+        BulletInfo.Src = net.ReadVectorFloat()
 
         local Manager = BulletPhysicsProjectileSystem:GetGlobalManager()
         local Projectile = Manager:CreateProjectile(BulletInfo)
@@ -179,7 +172,6 @@ hook.Add("SetupMove", HookIndentifier .. "PredictedManagerLogic", function(Playe
         Manager:OnSetupMove(Player, CMoveData, CUserCmd)
     end
 end)
-
 -- Run unpredicted managers
 hook.Add("Tick", HookIndentifier .. "UnpredictedManagerLogic", function()
     -- Run managers for every projectile system
@@ -198,14 +190,8 @@ end)
 EntityMeta = FindMetaTable("Entity")
 EntityMeta._FireBullets = EntityMeta._FireBullets or EntityMeta.FireBullets
 function EntityMeta:FireBullets(BulletInfo)
-    -- Checks if the weapon is detoured in the settings
-    if IsCurrentWeaponDetoured(self) then
-        BulletInfo.TracerName = "Projectile"
-        self:_FireBullets(BulletInfo)
-        return
-    end
-
     -- Localize BulletInfo to prevent editing of the table outside the function
+
     local BulletInfo = table.Copy(BulletInfo)
 
     -- Sets the bullet's attacker
@@ -216,35 +202,38 @@ function EntityMeta:FireBullets(BulletInfo)
 
     -- Track which bullets are which
     BulletInfo.TracerName = "Projectile"
+
+    -- Create the table if it doesnt exist
+    Fallback(BulletInfo, "Settings", {})
+
+    local ConvarSettings = BulletPhysicsGetConvars()
     
-    local Settings = {
-        Speed = BulletPhysics.Settings.Projectiles.DefaultSpeed,
-        Gravity = BulletPhysics.Settings.Projectiles.Gravity,
-        ShouldBounce = BulletPhysics.Settings.Projectiles.ShouldBounce,
-        EnableSounds = BulletPhysics.Settings.Projectiles.EnableSounds
-    }
-    if BulletInfo.Settings then
-        Settings.Speed = BulletInfo.Settings.Speed
-        Settings.Gravity = BulletInfo.Settings.Gravity
-    end
-    BulletInfo.Settings = Settings
+    Fallback(BulletInfo.Settings, "Speed", ConvarSettings.Speed:GetInt())
+    Fallback(BulletInfo.Settings, "Gravity", ConvarSettings.Gravity:GetInt())
+    Fallback(BulletInfo.Settings, "EnableSounds", ConvarSettings.EnableSounds:GetBool())
+    Fallback(BulletInfo.Settings, "ShouldBounce", ConvarSettings.ShouldBounce:GetBool())
     
     -- Shoot many bullets
     local Num = BulletInfo.Num or 1
     for NumBullets = 1, Num do
-        -- Save bullet.dir for later so we can revert back after
+        -- Save bullet.dir for later so we can revert back (Spread modifies the direction)
         local Dir = BulletInfo.Dir
-
-        ProjectileInfo:CalculateSpread(BulletInfo, engine.TickCount(), NumBullets)
+        
+        if BulletInfo.Spread then
+            ProjectileInfo:CalculateSpread(BulletInfo, engine.TickCount(), NumBullets)
+        end
 
         if self:IsPlayer() then
             -- Get the player's assigned manager
             local Manager = self:GetProjectileManager()
 
+            -- Create the projectile
             Manager:CreateProjectile(BulletInfo)
         elseif SERVER then
             -- Gets the serverside manager
             local Manager = BulletPhysicsProjectileSystem:GetGlobalManager()
+
+            -- Create the projectile
             Manager:CreateProjectile(BulletInfo)
         end
 
@@ -306,7 +295,7 @@ if CLIENT then
         end
     end)
 
-    hook.Add("PostDrawOpaqueRenderables", HookIndentifier .. "ProjectileRender", function()
+    hook.Add("PostDrawTranslucentRenderables", HookIndentifier .. "ProjectileRender", function()
         -- Render localplayer's bullets
         local Manager = LocalPlayer():GetProjectileManager()
         if Manager then
@@ -319,14 +308,4 @@ if CLIENT then
             Manager:RenderProjectiles()
         end
     end)
-end
-
-BulletPhysics.AmmoTypeCache = {}
-function BulletPhysics:GetAmmoTypeDamage(AmmoID)
-    -- Attempt to return a cached value first.
-    if self.AmmoTypeCache[AmmoID] then return self.AmmoTypeCache[AmmoID] end
-    -- Set the cached variable for appropriate ammo type.
-    self.AmmoTypeCache[AmmoID] = game.GetAmmoPlayerDamage(AmmoID)
-
-    return self.AmmoTypeCache[AmmoID]
 end

@@ -5,7 +5,30 @@ local C_HitboxSystem = {}
 C_HitboxSystem.__index = C_HitboxSystem
 _G.C_HitboxSystem = C_HitboxSystem
 
+function GetPlayerHitboxes(self)
+    local HitBox = {}
+    local I = 1
 
+    if not self:GetHitBoxGroupCount() then return HitBox end
+
+
+    for group = 0, self:GetHitBoxGroupCount() - 1 do
+        for hitbox = 0, self:GetHitBoxCount(group) - 1 do
+
+            local pos, ang =  self:GetBonePosition(self:GetHitBoxBone(hitbox, group))
+            local mins, maxs = self:GetHitBoxBounds(hitbox, group)
+
+            HitBox[I] = {
+                Position = pos,
+                Angle = ang,
+                Min = mins,
+                Max = maxs
+            }
+            I = I + 1
+        end
+    end
+    return HitBox
+end
 -- Save hitboxes of every player
 -- Buffer length DEF 1 second
 
@@ -13,19 +36,13 @@ _G.C_HitboxSystem = C_HitboxSystem
 -- Will modify traceresults inputted
 -- Use lag compensation to get every players hitbox at a tick
 
-local function RenderHitboxes(Hitbox)
+local function RenderHitboxes(Hitbox, T)
     if not Hitbox then return end
     for k,v in pairs(Hitbox) do
-        if SERVER then
-            debugoverlay.BoxAngles(v.Position, v.Min, v.Max, v.Angle, 0, Color(255, 196, 128, 64))
+        if T then
+            debugoverlay.BoxAngles(v.Position, v.Min, v.Max, v.Angle, 4, Color(255, 196, 128, 64))
         else
-            debugoverlay.BoxAngles(v.Position, v.Min, v.Max, v.Angle, 0, Color(128, 196, 255, 0))
-
-            local Pos = (v.Max + v.Min) * 0.5
-            Pos:Rotate(v.Angle)
-            Pos = Pos + v.Position
-            debugoverlay.EntityTextAtPosition(Pos, 0, "" .. (k - 1), 0, Color(255, 255, 255) )
-            debugoverlay.Sphere(Pos, 0.1, 0, Color(255, 255, 255, 0), true)
+            debugoverlay.BoxAngles(v.Position, v.Min, v.Max, v.Angle, 4, Color(128, 196, 255, 64))
         end
     end
 end
