@@ -18,7 +18,7 @@ local BounceOn = {
     [MAT_SNOW]        = false,
     [MAT_DIRT]        = true,
     [MAT_GRASS]       = false,
-    [MAT_GLASS]       = true,
+    [MAT_GLASS]       = false,
     [MAT_WOOD]        = true,
     [MAT_FLESH]       = false,
     [MAT_BLOODYFLESH] = false,
@@ -149,9 +149,9 @@ function ProjectileInfo:Setup(BulletInfo)
 
     self.BulletInfo.Spread = nil
     self.Position = BulletInfo.Src
+    self.LastPosition = BulletInfo.MuzzlePosition or self.Position
     self.InterpolatedPosition = self.Position
     self.TimeAtLastSimulation = UnPredictedCurTime()
-    self.LastPosition = self.Position
     self.Velocity = BulletInfo.Dir * self.Settings.Speed
     self.Forward = self.Velocity:GetNormalized()
     self.Attacker = BulletInfo.Attacker
@@ -193,12 +193,10 @@ function ProjectileInfo:InterpolatePositions()
         self.InterpolatedPosition = self.Position
         return
     end
-    
-    local TimePassed = math.Clamp((UnPredictedCurTime() - self.TimeAtLastSimulation) / engine.TickInterval(), 0, 1)
-
+    local CurrentTime = UnPredictedCurTime()
+    local TimePassed = math.Clamp((CurrentTime - self.TimeAtLastSimulation) / engine.TickInterval(), 0, 1)
     self.InterpolatedPosition = LerpVector(TimePassed, self.LastPosition, self.Position)
 end
-
 
 local _AmmoTypeCache = {}
 function GetAmmoTypeDamage(AmmoID)
@@ -353,7 +351,6 @@ function ProjectileInfo:Simulate()
         self.MoveTrace.Hit = false
     end
 
-
     -- Apply gravity
     local Gravity = Vector(0, 0, -Settings.Gravity) * UpdateRate
     self.Velocity = self.Velocity + Gravity
@@ -363,7 +360,6 @@ function ProjectileInfo:Simulate()
     self.TickLifetime = self.TickLifetime + 1
 
     self:OnSimulate()
-    self:SimulateWaterDrag()
 end
 
 local function PointContents(Pos, Content)
@@ -393,7 +389,6 @@ function ProjectileInfo:SimulateWaterDrag()
         end
 
         if VelocityLength > 2000 then
-            local Normalized = VelocityLength * 0.0005
             BubbleTrail(MoveTrace.StartPos, MoveTrace.HitPos, 8)
         end
     end
@@ -403,7 +398,8 @@ function ProjectileInfo:OnSimulate()
     -- Do splash effects
     local MoveTrace = self.MoveTrace
 
-    local InWater = PointContents(MoveTrace.HitPos, CONTENTS_WATER) or PointContents(MoveTrace.HitPos, CONTENTS_TRANSLUCENT)
+    local IsSlime = PointContents(MoveTrace.HitPos, CONTENTS_SLIME)
+    local InWater = PointContents(MoveTrace.HitPos, CONTENTS_WATER) or IsSlime // CONTENTS_TRANSLUCENT
     if InWater and CLIENT then
         local WaterTrace = {}
         util.TraceLine({
@@ -415,15 +411,21 @@ function ProjectileInfo:OnSimulate()
         })
 
         if WaterTrace.Hit and not WaterTrace.StartSolid then
+
+            local Flags = IsSlime and 1 or 2
+
             -- Setup splash effect
             SplashEffect:SetOrigin(WaterTrace.HitPos)
+            SplashEffect:SetSurfaceProp(WaterTrace.SurfaceProps)
+            SplashEffect:SetFlags(Flags)
             SplashEffect:SetScale(6)
 
             -- Apply effect
             util.Effect("gunshotsplash", SplashEffect)
-            util.Effect("waterripple", SplashEffect)
         end
     end
+
+    self:SimulateWaterDrag()
 end
 
 function ProjectileInfo:OnHit()
@@ -464,7 +466,7 @@ function ProjectileInfo:OnBounce()
     BounceEffect:SetOrigin(self.Position)
     BounceEffect:SetNormal(HalfNormal)
     BounceEffect:SetMagnitude(1)
-    BounceEffect:SetScale(1)
+    BounceEffect:SetScale(0.05)
     util.Effect( "ElectricSpark", BounceEffect)
 
     -- Play bounce sound
@@ -503,17 +505,19 @@ if CLIENT then
             local BulletForward = self.Forward
             
             local NewQuad = {}
+    
             for k, Vert in pairs(Quad) do
                 local Vert = Vector(Vert[1], Vert[2], Vert[3])
                 
                 local DirectionToBullet = (BulletPosition - EyePosition):GetNormalized()
+                local DirectionToVert = ((Vert + BulletPosition) - EyePosition):GetNormalized()
             
                 Vert:Rotate((-DirectionToBullet):Angle())
                 
-                local DotToBullet = 1 - (math.abs(DirectionToBullet:Dot(BulletForward)) * 0.75)
+                local DotToBullet = math.ease.OutCubic(1 - (math.abs(DirectionToVert:Dot(BulletForward)) * 0.9))
 
                 Vert = Squash(Vert, BulletForward, -BulletSpeed * 0.05 / DotToBullet)
-                Vert = Squash(Vert, DirectionToBullet, 1)
+                --Vert = Squash(Vert, DirectionToBullet, 1)
             
                 NewQuad[k] = Vert + BulletPosition
             end

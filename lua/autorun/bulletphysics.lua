@@ -24,6 +24,7 @@ local function Fallback(tbl, index, fallback)
     if tbl[index] == nil then
         tbl[index] = fallback
     end
+    return tbl[index]
 end
 
 -- Hook name
@@ -54,7 +55,6 @@ local function OnCreateProjectile(self, BulletInfo)
     -- Send messages to players other than attacker
     net.Start(HookIndentifier .. "NetworkBullets", true)
         net.WriteEntity(BulletInfo.Attacker)
-        net.WriteFloat(BulletInfo.HullSize)
         net.WriteFloat(BulletInfo.Settings.Speed)
         net.WriteFloat(BulletInfo.Settings.Gravity)
         net.WriteBool(BulletInfo.Settings.ShouldBounce)
@@ -106,6 +106,30 @@ if SERVER then
     -- Create the server manager
     BulletPhysicsProjectileSystem:CreateGlobalManager()
     BulletPhysicsProjectileSystem:GetGlobalManager().OnCreateProjectile = OnCreateProjectile
+
+
+
+    function weapons.GetListByCategory()
+        local Categories = {}
+
+        local WeaponList = weapons.GetList()
+
+        for k, Weapon in next, WeaponList do
+            if Weapon.Category and Weapon.Spawnable then
+                local Category = Fallback(Categories, Weapon.Category, {})
+
+                Category[#Category+1] = Weapon
+            end
+        end
+        return Categories
+    end
+
+    --PrintTable(GetWeaponsByCategory())
+
+    for k,v in pairs(weapons.GetListByCategory()) do
+        --print(#v, k)
+        print(string.format("(%G) - %s", #v, k))
+    end
 end
 
 if CLIENT then
@@ -131,7 +155,6 @@ if CLIENT then
         BulletInfo.Settings = {}
 
         BulletInfo.Attacker = net.ReadEntity()
-        BulletInfo.HullSize = net.ReadFloat()
         BulletInfo.Settings.Speed = net.ReadFloat()
         BulletInfo.Settings.Gravity = net.ReadFloat()
         BulletInfo.Settings.ShouldBounce = net.ReadBool()
@@ -142,9 +165,9 @@ if CLIENT then
 
         local Manager = BulletPhysicsProjectileSystem:GetGlobalManager()
         local Projectile = Manager:CreateProjectile(BulletInfo)
-        Projectile.ShouldFireBulletOnHit = false
     end)
 end
+
 
 // Shared
 
@@ -156,6 +179,7 @@ hook.Add("SetupMove", HookIndentifier .. "PredictedManagerLogic", function(Playe
         Manager:OnSetupMove(Player, CMoveData, CUserCmd)
     end
 end)
+
 -- Run unpredicted managers
 hook.Add("Tick", HookIndentifier .. "UnpredictedManagerLogic", function()
     -- Run managers for every projectile system
@@ -169,13 +193,18 @@ hook.Add("Tick", HookIndentifier .. "UnpredictedManagerLogic", function()
 end)
 
 
-
 -- Detours the FireBullets function
 EntityMeta = FindMetaTable("Entity")
 EntityMeta._FireBullets = EntityMeta._FireBullets or EntityMeta.FireBullets
 function EntityMeta:FireBullets(BulletInfo)
-    -- Localize BulletInfo to prevent editing of the table outside the function
+    local ConvarSettings = BulletPhysicsGetConvars()
+    -- Master killswitch
+    if not ConvarSettings.Enabled:GetBool() then
+        self:_FireBullets(BulletInfo)
+        return
+    end
 
+    -- Localize BulletInfo to prevent editing of the table outside the function
     local BulletInfo = table.Copy(BulletInfo)
 
     -- Sets the bullet's attacker
@@ -186,12 +215,23 @@ function EntityMeta:FireBullets(BulletInfo)
 
     -- Track which bullets are which
     BulletInfo.TracerName = "Projectile"
+    -- Get the muzzle position
+    //if CLIENT and self:IsPlayer() then
+    //    local ViewModel = self:GetViewModel()
+    //    local Muzzle = ViewModel:LookupAttachment("muzzle")
+    //    if Muzzle > 0 then
+    //        local Muzzle = ViewModel:GetAttachment(Muzzle)
+    //        if Muzzle then
+    //            print(Muzzle.Pos, Muzzle.Ang)
+    //            debugoverlay.Sphere(Muzzle.Pos, 8, 1, Color(255, 255, 255, 0))
+    //        end
+    //    end
+    //    BulletInfo.MuzzlePosition = nil
+    //end
 
     -- Create the table if it doesnt exist
     Fallback(BulletInfo, "Settings", {})
 
-    local ConvarSettings = BulletPhysicsGetConvars()
-    
     Fallback(BulletInfo.Settings, "Speed", ConvarSettings.Speed:GetInt())
     Fallback(BulletInfo.Settings, "Gravity", ConvarSettings.Gravity:GetInt())
     Fallback(BulletInfo.Settings, "EnableSounds", ConvarSettings.EnableSounds:GetBool())
@@ -228,6 +268,12 @@ end
 
 -- Override bullets from engine weapons
 hook.Add("PostEntityFireBullets", HookIndentifier .. "FireBullets", function(Entity, BulletInfo)
+    local ConvarSettings = BulletPhysicsGetConvars()
+
+    if not ConvarSettings.Enabled:GetBool() then
+        return true
+    end
+
     -- Dont override our bullets
     if BulletInfo.TracerName == "Projectile" then return true end
 

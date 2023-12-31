@@ -1,3 +1,5 @@
+AddCSLuaFile()
+
 if SERVER then return end
 local VersionNumber = 4
 local Changelog = [[(1) Adjusted bullet visibility/rendering.
