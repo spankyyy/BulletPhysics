@@ -31,6 +31,7 @@ local function GetConVarCached(ConvarName)
 
     return ConvarCache[ConvarName]
 end
+
 local convars = {
     {"bulletphysics_defaultspeed", 30000, "Default speed of projectiles", 0, 100000},
     {"bulletphysics_gravity", 1000, "Default gravity of projectiles", 0, 100000},
@@ -40,56 +41,48 @@ local convars = {
     {"bulletphysics_enabled", 1, "Master killswitch", 0, 100000}
 }
 
--- create convars if they dont exist
-//local name = "bulletphysics_defaultspeed"
-//if not ConVarExists(name) then
-//    CreateConVar(name, 30000, FCVAR_ARCHIVE + FCVAR_REPLICATED, "Default speed of projectiles", 0, 1000000)
-//    print("Created new convar: " .. name)
-//end
-//
-//local name = "bulletphysics_gravity"
-//if not ConVarExists(name) then
-//    CreateConVar(name, 1000, FCVAR_ARCHIVE + FCVAR_REPLICATED, "Default gravity of projectiles", 0, 1000000)
-//    print("Created new convar: " .. name)
-//end
-//
-//local name = "bulletphysics_enablesounds"
-//if not ConVarExists(name) then
-//    CreateConVar(name, 1, FCVAR_ARCHIVE + FCVAR_REPLICATED, "Enable sounds for projectiles", 0, 1)
-//    print("Created new convar: " .. name)
-//end
-//
-//local name = "bulletphysics_enablebounce"
-//if not ConVarExists(name) then
-//    CreateConVar(name, 1, FCVAR_ARCHIVE + FCVAR_REPLICATED, "Enable ricochet for projectiles", 0, 1)
-//    print("Created new convar: " .. name)
-//end
-//
-//local name = "bulletphysics_enablepenetration"
-//if not ConVarExists(name) then
-//    CreateConVar(name, 1, FCVAR_ARCHIVE + FCVAR_REPLICATED, "Enable penetration for projectiles", 0, 1)
-//    print("Created new convar: " .. name)
-//end
-//
-//local name = "bulletphysics_enabled"
-//if not ConVarExists(name) then
-//    CreateConVar(name, 1, FCVAR_ARCHIVE + FCVAR_REPLICATED, "Master killswitch", 0, 1)
-//    print("Created new convar: " .. name)
-//end
 
+local HookIndentifier = "BPhys_"
 if SERVER then
+    util.AddNetworkString(HookIndentifier .. "NetworkConvars")
+    
     for k, convar in ipairs(convars) do
         if not ConVarExists(convar[1]) then
-            CreateConVar(convar[1], convar[2], FCVAR_ARCHIVE + FCVAR_REPLICATED, convar[3], convar[4], convar[5])
+            CreateConVar(convar[1], convar[2], FCVAR_ARCHIVE + FCVAR_REPLICATED + FCVAR_NOTIFY, convar[3], convar[4], convar[5])
             print("Created new convar: " .. convar[1])
         end
     end
+
+    net.Receive(HookIndentifier .. "NetworkConvars", function(len, ply)
+        local name = net.ReadString()
+        local val = net.ReadString()
+        if ply:IsSuperAdmin() then
+            local Convar = GetConVarCached(name)
+            Convar:SetString(val)
+        else
+            print("Player not superadmin, Ignoring")
+        end
+    end)
+
 end
 
 if CLIENT then
     for k, convar in ipairs(convars) do
         if not ConVarExists(convar[1]) then
-            CreateConVar(convar[1], convar[2], FCVAR_ARCHIVE, convar[3], convar[4], convar[5])
+            local Convar = CreateConVar(convar[1], convar[2], FCVAR_ARCHIVE, convar[3], convar[4], convar[5])
+            cvars.AddChangeCallback(convar[1], function(name, old, new)
+                if not LocalPlayer():IsSuperAdmin() then
+                    Convar:SetString(old)
+                    print("You are not allowed to use this, SUPERADMIN only")
+                    return
+                end
+
+                net.Start(HookIndentifier .. "NetworkConvars")
+                    net.WriteString(name)
+                    net.WriteString(new)
+                net.SendToServer()
+            end)
+
             print("Created new convar: " .. convar[1])
         end
     end

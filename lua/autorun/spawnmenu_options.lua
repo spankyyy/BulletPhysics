@@ -2,6 +2,14 @@ AddCSLuaFile()
 
 local HookIndentifier = "BPhys_"
 
+local function MySlider(Parent, Name, ID, Min, Max, Decimals)
+    local Slider = Parent:NumSlider(Name, ID, Min, Max, Decimals)
+    local Text = Slider:GetTextArea()
+    Text:SetUpdateOnType(false)
+    Text.OnTextChanged = function() end
+    return Slider
+end
+
 
 hook.Add("AddToolMenuCategories", HookIndentifier .. "SpawnmenuOptionsCategory", function()
 	spawnmenu.AddToolCategory("Options", "bulletphysics_options", "Bullet Physics")
@@ -26,10 +34,10 @@ hook.Add("PopulateToolMenu", HookIndentifier .. "SpawnmenuOptions", function()
 		Panel:AddItem(divider)
         //////////////////////////////////////////////////////
 
-        Panel:NumSlider("Default Gravity", "bulletphysics_gravity", 0, 10000, 0)
+        MySlider(Panel, "Default Gravity", "bulletphysics_gravity", 0, 10000, 0)
         Panel:ControlHelp("Sets the default gravity of the bullets.")
 
-        Panel:NumSlider("Default Speed", "bulletphysics_defaultspeed", 10000, 1000000, 0)
+        MySlider(Panel, "Default Speed", "bulletphysics_defaultspeed", 10000, 1000000, 0)
         Panel:ControlHelp("Sets the default speed of the bullets.")
 
         // Divider
