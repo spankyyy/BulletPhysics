@@ -19,7 +19,7 @@ local BounceOn = {
     [MAT_DIRT]        = true,
     [MAT_GRASS]       = false,
     [MAT_GLASS]       = false,
-    [MAT_WOOD]        = true,
+    [MAT_WOOD]        = false,
     [MAT_FLESH]       = false,
     [MAT_BLOODYFLESH] = false,
     [MAT_ALIENFLESH]  = false,
@@ -30,6 +30,16 @@ local BounceOn = {
 }
 
 // Functions
+
+local ConvarCache = {}
+local function GetConVarCached(ConvarName)
+    if ConvarCache[ConvarName] == nil then
+        local ConVar = GetConVar(ConvarName)
+        ConvarCache[ConvarName] = ConVar
+    end
+
+    return ConvarCache[ConvarName]
+end
 
 function util.DistanceToLineFrac(Start, End, Point)
     local Dist = Start:Distance(End)
@@ -72,6 +82,67 @@ local function Fallback(tbl, index, fallback)
 end
 
 
+local function ToBinary(Number)
+    local theString = ""
+
+    local n = 32
+    for i=1, n do
+        local toCheck = 2 ^ (n - i)
+
+        if bit.band(Number, toCheck) == toCheck then
+            theString = theString .. "1"
+        else
+            theString = theString .. "0"
+        end
+    end
+    return theString
+end
+
+local function IsEntityVisible(Entity)
+    if not Entity or not Entity:IsValid() then return end
+    local flags = Entity:GetEFlags()
+    return bit.band(flags, EF_NODRAW) == EF_NODRAW
+end
+
+local function GetMuzzlePosition(self)
+    local MuzzlePosition
+    -- Get the muzzle position
+    if self:IsPlayer() then
+        local ActiveWeapon = self:GetActiveWeapon()
+        local ViewModel = self:GetViewModel()
+
+        -- Get the viewmodel from the weapon itself if its possible
+        if ActiveWeapon and ActiveWeapon:IsValid() and ActiveWeapon.GetViewModel then
+            ViewModel = ActiveWeapon:GetViewModel() or ViewModel
+        end
+
+        -- If the world model is visible, use the world model
+        if IsEntityVisible(ActiveWeapon) then
+            ViewModel = ActiveWeapon
+        end
+
+        -- If "muzzle" doesnt exist use the first attachment which is usually the muzzle
+        local MuzzleID = ViewModel:LookupAttachment("muzzle")
+        if MuzzleID == 0 and ViewModel:GetAttachment(1) then 
+            MuzzleID = 1
+        end
+
+        -- Get the muzzle attachment
+        if MuzzleID > 0 then
+            local Muzzle = ViewModel:GetAttachment(MuzzleID)
+            if Muzzle then
+                MuzzlePosition = Muzzle.Pos
+            end
+        end
+    end
+    if MuzzlePosition then
+        debugoverlay.Sphere(MuzzlePosition, 3, 5, Color(255, 255, 255, 0), false)
+    end
+
+    return MuzzlePosition
+end
+
+
 -- Gets the player metatable
 PlayerMeta = FindMetaTable("Player")
 
@@ -94,7 +165,6 @@ local DefaultBulletInfo = {
 }
 
 -- Creates a basic projectile structure
-
 function ProjectileInfo:New()
     local self = {}
 
@@ -149,8 +219,9 @@ function ProjectileInfo:Setup(BulletInfo)
 
     self.BulletInfo.Spread = nil
     self.Position = BulletInfo.Src
-    self.LastPosition = BulletInfo.MuzzlePosition or self.Position
+    self.LastPosition = self.Position
     self.InterpolatedPosition = self.Position
+    self.VirtualPosition = GetMuzzlePosition(BulletInfo.Attacker)
     self.TimeAtLastSimulation = UnPredictedCurTime()
     self.Velocity = BulletInfo.Dir * self.Settings.Speed
     self.Forward = self.Velocity:GetNormalized()
@@ -278,19 +349,21 @@ function ProjectileInfo:FireBullet()
 end
 
 function ProjectileInfo:ShouldBounce()
+    -- Self explanatory
     if not BounceOn[self.MoveTrace.MatType] then
         return false
     end
 
+    -- Dont bounce if the speed is not high enough
     if self.Velocity:LengthSqr() < (1000 ^ 2) then
         return false
     end
 
+    -- Dont bounce on anything other than props and world
     if self.MoveTrace.Entity and self.MoveTrace.Entity:IsValid() then
         local EntityClass = self.MoveTrace.Entity:GetClass()
         if not (EntityClass == "prop_physics" or EntityClass == "worldspawn") then return false end
     end
-
 
     local Dot = self.MoveTrace.HitNormal:Dot(-self.Forward:GetNormalized())
     return (Dot < self.Settings.MaxBounceAngle) and (self.MoveTrace.Fraction ~= 0)
@@ -298,7 +371,13 @@ end
 
 function ProjectileInfo:Simulate()
     local Settings = self.Settings
-    local UpdateRate = engine.TickInterval()
+    --local UpdateRate = engine.TickInterval()
+    local UpdateRate
+    if SERVER then
+        UpdateRate = engine.TickInterval() * GetConVarCached("host_timescale"):GetFloat()
+    else
+        UpdateRate = engine.ServerFrameTime()
+    end
     
     local Velocity = self.Velocity
     util.TraceLine({
@@ -314,7 +393,7 @@ function ProjectileInfo:Simulate()
     self.Position = self.MoveTrace.HitPos
     self.Forward = Velocity:GetNormalized()
 
-    -- Bounce
+    -- Bounce, wtf is this honestly
     self.TicksSinceLastBounce = self.TicksSinceLastBounce + 1
     if self.MoveTrace.Hit and Settings.ShouldBounce then
         local Fraction = (1 - self.MoveTrace.Fraction)
@@ -366,6 +445,8 @@ local function PointContents(Pos, Content)
     return bit.band(util.PointContents(Pos), Content) == Content
 end
 
+// BUG!!!
+// The bubbles are books on gm_novenka (wtf?)
 local function BubbleTrail(Start, End, Count)
     for i=0, Count-1 do
         local Delta = (Count == 1) and 0.5 or i / (Count-1)
@@ -375,6 +456,7 @@ local function BubbleTrail(Start, End, Count)
     end
 end
 
+// TODO make this better 
 function ProjectileInfo:SimulateWaterDrag()
     local SpeedLoss = 0.5
 
@@ -481,25 +563,39 @@ if CLIENT then
     local GlowEffect = Material("sprites/orangecore2")
     local Tracer = Material("effects/tracer_middle")
 
-    local r = 4
+    local r = 3
     local Quad = {Vector(0, r, r), Vector(0, r, -r), Vector(0, -r, -r), Vector(0, -r, r)}
     function ProjectileInfo:Render()
         local BulletSpeed = self.Velocity:Length() * engine.TickInterval()
         local IsAttackerPlayer = self.Attacker == LocalPlayer()
 
-        local RenderTick = 3
-        if self.TicksSinceLastBounce > RenderTick or not IsAttackerPlayer then
-
-            -- Tracer
-            render.SetMaterial(Tracer)
-            if self.TicksSinceLastBounce < (RenderTick - 1) then
+        -- Render the tracer
+        local RenderTick = 3 -- Amount of ticks/frame to skip before rendering the tracer
+        if self.TicksSinceLastBounce > RenderTick then
+            if self.TicksSinceLastBounce < (RenderTick - 1) then 
+                render.SetMaterial(Tracer)
                 render.DrawBeam(self.InterpolatedPosition, self.LastPosition, 3, 0, 1)
             else
+                render.SetMaterial(Tracer)
                 render.DrawBeam(self.InterpolatedPosition, self.InterpolatedPosition - self.Forward * BulletSpeed * 1, 3, 0, 1)
             end
         end
 
-        if self.TicksSinceLastBounce > 1 then
+        -- Render the tracer for a couple frames so it looks like the bullet came out the gun
+        local Bounced = (self.TicksSinceLastBounce ~= self.TickLifetime)
+        local ShouldRender = (self.TickLifetime >= 3 and self.TickLifetime <= 3) -- Amount of frames here
+        local MuzzlePosition = self.VirtualPosition
+
+        if not Bounced and ShouldRender and MuzzlePosition then
+            render.SetMaterial(Tracer)
+            render.DrawBeam(self.InterpolatedPosition, MuzzlePosition, 3, 0, 1)
+
+            render.SetMaterial(GlowEffect)
+            render.DrawBeam(self.InterpolatedPosition, MuzzlePosition, 1, 1, 0.3)
+        end
+
+        -- Skip 2 frames before rendering
+        if self.TicksSinceLastBounce > 2 then
             local EyePosition = EyePos()
             local BulletPosition = self.InterpolatedPosition
             local BulletForward = self.Forward

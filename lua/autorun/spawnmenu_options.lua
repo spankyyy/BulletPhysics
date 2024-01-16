@@ -55,6 +55,9 @@ hook.Add("PopulateToolMenu", HookIndentifier .. "SpawnmenuOptions", function()
         Panel:CheckBox("Enable Penetration", "bulletphysics_enablepenetration")
         Panel:ControlHelp("Coming soon.")
 
+        Panel:CheckBox("Enable Popup", "bulletphysics_enablepopup")
+        Panel:ControlHelp("Enables the update popup.")
+
         // Divider
 		local divider = vgui.Create("DPanel")
 		divider:SetTall(4)

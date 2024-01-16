@@ -94,6 +94,11 @@ local function CreateChangelogMenu()
 end
 
 timer.Simple(2, function()
+    if not game.SinglePlayer() then return end
+    local convars = _G.BulletPhysicsGetConvars()
+
+    if not convars.Popup:GetBool() then return end
+
     -- If it doesnt exist, create it and open popup
     if not file.Exists("bulletphysics", "DATA") then
         file.CreateDir("bulletphysics")

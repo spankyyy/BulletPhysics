@@ -38,14 +38,15 @@ local convars = {
     {"bulletphysics_enablesounds", 1, "Enable sounds for projectiles", 0, 1},
     {"bulletphysics_enablebounce", 1, "Enable ricochet for projectiles", 0, 1},
     {"bulletphysics_enablepenetration", 1, "Enable penetration for projectiles", 0, 1},
+    {"bulletphysics_enablepopup", 1, "Enables the update popup", 0, 1},
     {"bulletphysics_enabled", 1, "Master killswitch", 0, 100000}
 }
-
 
 local HookIndentifier = "BPhys_"
 if SERVER then
     util.AddNetworkString(HookIndentifier .. "NetworkConvars")
     
+    -- Create convars
     for k, convar in ipairs(convars) do
         if not ConVarExists(convar[1]) then
             CreateConVar(convar[1], convar[2], FCVAR_ARCHIVE + FCVAR_REPLICATED + FCVAR_NOTIFY, convar[3], convar[4], convar[5])
@@ -53,6 +54,8 @@ if SERVER then
         end
     end
 
+
+    -- Receive new/changed convars from superadmins
     net.Receive(HookIndentifier .. "NetworkConvars", function(len, ply)
         local name = net.ReadString()
         local val = net.ReadString()
@@ -60,7 +63,7 @@ if SERVER then
             local Convar = GetConVarCached(name)
             Convar:SetString(val)
         else
-            print("Player not superadmin, Ignoring")
+            print("BULLETPHYSICS - Player not superadmin, Ignoring")
         end
     end)
 
@@ -71,16 +74,17 @@ if CLIENT then
         if not ConVarExists(convar[1]) then
             local Convar = CreateConVar(convar[1], convar[2], FCVAR_ARCHIVE, convar[3], convar[4], convar[5])
             cvars.AddChangeCallback(convar[1], function(name, old, new)
+                if old == new then return end
                 if not LocalPlayer():IsSuperAdmin() then
-                    Convar:SetString(old)
-                    print("You are not allowed to use this, SUPERADMIN only")
-                    return
+                    --Convar:SetString(old)
+                    print("BULLETPHYSICS - You are not allowed to use this, Superadmin only.")
+                else
+                    -- Send the update to server (it checks if youre superadmin, no fooling around)
+                    net.Start(HookIndentifier .. "NetworkConvars")
+                        net.WriteString(name)
+                        net.WriteString(new)
+                    net.SendToServer()
                 end
-
-                net.Start(HookIndentifier .. "NetworkConvars")
-                    net.WriteString(name)
-                    net.WriteString(new)
-                net.SendToServer()
             end)
 
             print("Created new convar: " .. convar[1])
@@ -95,6 +99,8 @@ function BulletPhysicsGetConvars()
     Convars.Gravity = GetConVarCached("bulletphysics_gravity")
     Convars.EnableSounds = GetConVarCached("bulletphysics_enablesounds")
     Convars.ShouldBounce = GetConVarCached("bulletphysics_enablebounce")
+    Convars.EnablePenetration = GetConVarCached("bulletphysics_enablepenetration")
+    Convars.Popup = GetConVarCached("bulletphysics_enablepopup")
     Convars.Enabled = GetConVarCached("bulletphysics_enabled")
     return Convars
 end

@@ -109,27 +109,27 @@ if SERVER then
 
 
 
-    function weapons.GetListByCategory()
-        local Categories = {}
+    //function weapons.GetListByCategory()
+    //    local Categories = {}
+    
+    //    local WeaponList = weapons.GetList()
+    
+    //    for k, Weapon in next, WeaponList do
+    //        if Weapon.Category and Weapon.Spawnable then
+    //            local Category = Fallback(Categories, Weapon.Category, {})
 
-        local WeaponList = weapons.GetList()
+    //            Category[#Category+1] = Weapon
+    //        end
+    //    end
+    //    return Categories
+    //end
 
-        for k, Weapon in next, WeaponList do
-            if Weapon.Category and Weapon.Spawnable then
-                local Category = Fallback(Categories, Weapon.Category, {})
+    //--PrintTable(GetWeaponsByCategory())
 
-                Category[#Category+1] = Weapon
-            end
-        end
-        return Categories
-    end
-
-    --PrintTable(GetWeaponsByCategory())
-
-    for k,v in pairs(weapons.GetListByCategory()) do
-        --print(#v, k)
-        print(string.format("(%G) - %s", #v, k))
-    end
+    //for k,v in pairs(weapons.GetListByCategory()) do
+    //    --print(#v, k)
+    //    --print(string.format("(%G) - %s", #v, k))
+    //end
 end
 
 if CLIENT then
@@ -192,11 +192,12 @@ hook.Add("Tick", HookIndentifier .. "UnpredictedManagerLogic", function()
     GlobalManager:OnSetupMoveUnpredicted()
 end)
 
-
 -- Detours the FireBullets function
 EntityMeta = FindMetaTable("Entity")
 EntityMeta._FireBullets = EntityMeta._FireBullets or EntityMeta.FireBullets
 function EntityMeta:FireBullets(BulletInfo)
+    if not IsFirstTimePredicted() then return end
+
     local ConvarSettings = BulletPhysicsGetConvars()
     -- Master killswitch
     if not ConvarSettings.Enabled:GetBool() then
@@ -215,19 +216,6 @@ function EntityMeta:FireBullets(BulletInfo)
 
     -- Track which bullets are which
     BulletInfo.TracerName = "Projectile"
-    -- Get the muzzle position
-    //if CLIENT and self:IsPlayer() then
-    //    local ViewModel = self:GetViewModel()
-    //    local Muzzle = ViewModel:LookupAttachment("muzzle")
-    //    if Muzzle > 0 then
-    //        local Muzzle = ViewModel:GetAttachment(Muzzle)
-    //        if Muzzle then
-    //            print(Muzzle.Pos, Muzzle.Ang)
-    //            debugoverlay.Sphere(Muzzle.Pos, 8, 1, Color(255, 255, 255, 0))
-    //        end
-    //    end
-    //    BulletInfo.MuzzlePosition = nil
-    //end
 
     -- Create the table if it doesnt exist
     Fallback(BulletInfo, "Settings", {})
@@ -268,13 +256,14 @@ end
 
 -- Override bullets from engine weapons
 hook.Add("PostEntityFireBullets", HookIndentifier .. "FireBullets", function(Entity, BulletInfo)
-    local ConvarSettings = BulletPhysicsGetConvars()
+    if not IsFirstTimePredicted() then return end
 
+    local ConvarSettings = BulletPhysicsGetConvars()
     if not ConvarSettings.Enabled:GetBool() then
         return true
     end
 
-    -- Dont override our bullets
+    -- Dont override our bullets (Shouldnt need this but here we are)
     if BulletInfo.TracerName == "Projectile" then return true end
 
     local BulletInfo = BulletInfo
