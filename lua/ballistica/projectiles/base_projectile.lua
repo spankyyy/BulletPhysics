@@ -267,7 +267,7 @@ function PROJECTILE:FireBullet(OptionalTrace)
             ImpactDamage:SetDamageType(DMG_PREVENT_PHYSICS_FORCE + DMG_BULLET)
             ImpactDamage:SetDamage(self.Damage)
             ImpactDamage:SetReportedPosition(Pos)
-            ImpactDamage:SetDamageForce(Normal)
+            --ImpactDamage:SetDamageForce(Normal)
     
             if IsValid(Attacker) then 
                 ImpactDamage:SetAttacker(Attacker)

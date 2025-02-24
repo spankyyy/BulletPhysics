@@ -248,8 +248,6 @@ if CLIENT then
     end)
 end
 
-
-print(GetConVar("ballistica_debug"):GetBool())
 if CLIENT then
     function draw.TextFull(tbl)
         draw.TextShadow(tbl, tbl.distance, tbl.alpha)

@@ -7,7 +7,7 @@ PROJECTILE.__index = PROJECTILE
 PROJECTILE.Base = "base_projectile"
 PROJECTILE.Name = "default_bullet"
 
-local HARDNESS = {
+HARDNESS = {
     SOFT = 1,
     FIRM = 2,
     HARD = 3
@@ -25,14 +25,13 @@ PROJECTILE.VirtualSince = 0
 
 PROJECTILE.PenetrationMultiplier = 1
 
-
 PROJECTILE.CoreHardness = HARDNESS.FIRM -- lead
 PROJECTILE.Diameter = 9 -- in mm
 PROJECTILE.Weight = 0.007 -- in kg
 PROJECTILE.DragCoefficient = 0.45 -- (unitless, it is derived from many other variables)
 
 
-PROJECTILE.TracerColor = Color(255, 240, 180)
+
 
 -- Test
 --PROJECTILE.Gravity = 0
@@ -165,11 +164,6 @@ end
 
 function PROJECTILE:Initialize()
     PROJECTILE.BaseClass.Initialize(self)
-    self.GlowColor = Color(self.TracerColor.r, self.TracerColor.g, self.TracerColor.b, 1)
-
-    if CLIENT then
-        self.PixVis = util.GetPixelVisibleHandle()
-    end
 end
 
 function PROJECTILE:MakeVirtual()
@@ -241,7 +235,6 @@ function PROJECTILE:Crack()
     local Start, End = self.LastPosition, self.Position
     local DistanceToLine, Point, Fraction = util.DistanceToLineFrac(Start, End, Eyepos)
     
-
     if self.TickLifetime <= 1 or Fraction >= 1 or self.BouncedThisTick then return end
 
     if self:IsSupersonic() then
@@ -270,7 +263,7 @@ function PROJECTILE:Crack()
 
             return
         end
-    elseif self:IsLethal() then
+    elseif self.Velocity:Length() > UNIT.FT_TO_HAMMER(600) then
         local Point = Point - self.Forward * 64
         if DistanceToLine < 100 then
             self.Cracked = true
@@ -285,6 +278,18 @@ function PROJECTILE:Crack()
             return
         end
     
+        if DistanceToLine < 500 then
+            self.Cracked = true
+            debugoverlay.Sphere(Point, 6, 0.1, Color(0, 255, 0, 0), false)
+    
+            local Volume = 1 - (DistanceToLine * 0.000625 * 3.2)
+            local Pitch = math.random(90, 100)
+
+            EmitSound("sonic_Crack.Subsonic", Point, 0, CHAN_AUTO, Volume, 150, 0, Pitch, 0)
+
+            return
+        end
+    else
         if DistanceToLine < 500 then
             self.Cracked = true
             debugoverlay.Sphere(Point, 6, 0.1, Color(0, 255, 0, 0), false)
@@ -634,103 +639,7 @@ function PROJECTILE:OnSimulate()
     if self:Penetrate() then return end
 end
 
-local TracerMaterial = Material("bulletphysics/tracer") --Material("effects/brightglow_y")
-local GlowMaterial = Material("bulletphysics/glow")
---local Tracer = Material("effects/tracer_middle2")
-local ColorWhite = Color(255, 255, 255)
-local ColorWhite2 = Color(255, 255, 255, 128)
-
---local TracerColor = Color(255, 240, 220)
-
-local ColCache = {}
-local function ColorCache(r, g, b, a)
-    local Index = "" .. r .. g .. b .. a
-    local ColC = ColCache[Index]
-    if not ColC then
-        local Col = Color(r, g, b, a)
-        ColCache[Index] = Col
-        return Col
-    end
-    return ColC
-end
-
-local Radius = 6
 function PROJECTILE:Render()
-    --if not self.InterpolatedPosition:ToScreen().visible then return true end
-    local TracerColor = self.TracerColor
-    local GlowColor = self.GlowColor
-
-    local Speed = self.Velocity:Length() * self:GetUpdateRate()
-
-    if self.TickLifetime > 2 and not self.BouncedThisTick then
-        local PixelDiameter = render.ComputePixelDiameterOfSphere(self.Position, Radius)
-
-        local EyePosition = EyePos()
-        local BulletPosition = self.InterpolatedPosition
-        local BulletForward = self.Forward
-        local DirectionToBullet = (BulletPosition - EyePosition):GetNormalized()
-
-        local DotToBullet = math.abs(BulletForward:Dot(DirectionToBullet))
-
-        local Scalar = 1 + (1 / (PixelDiameter * 0.3)) * 0.5
-        local Radius = Radius * Scalar
-
-
-        local Offset = (self.Position - self.LastPosition) * 0.4
-        local Start, End = BulletPosition - Offset, BulletPosition + Offset
-
-        local Offset = (self.Position - self.LastPosition) * 0.8
-        local Start, End = BulletPosition - Offset, BulletPosition
-
-
-        if self.Deleting then
-            End = self.Position
-        end
-
-        render.SetMaterial(GlowMaterial)
-        render.DrawBeam(Start, End, Radius * 5, 0.4, 0.6, TracerColor)
-        
-
-        render.SetMaterial(TracerMaterial)
-        render.DrawBeam(Start, End, Radius, 0.2, 0.8, ColorWhite2)
-
-        local Threshold = 0.95
-        if DotToBullet > Threshold then
-
-            local Alpha = math.Clamp(math.Remap(DotToBullet, Threshold, 1, 0, 1), 0, 1)
-
-            local Radius = Radius * Alpha
-
-            render.SetMaterial(GlowMaterial)
-            render.DrawSprite(BulletPosition, Radius * 1.5, Radius * 1.5, TracerColor)
-
-            render.SetMaterial(TracerMaterial)
-            render.DrawSprite(BulletPosition, Radius, Radius, ColorWhite2)
-        end
-        
-
-        local Intensity = math.ease.OutBounce(1 - math.min(1, self:GetLifetime() / 8)) ^ 10
-        local Size = Intensity * Scalar * 1
-
-        render.SetMaterial(GlowMaterial)
-        render.DrawSprite(BulletPosition, 256 * Size, 256 * Size, GlowColor)
-        render.DrawSprite(BulletPosition, 64 * Size, 64 * Size, GlowColor)
-        render.DrawSprite(BulletPosition, 32 * Size, 32 * Size, GlowColor)
-
-        if not self.Virtual then
-            local Light = DynamicLight(10000000 + self.Index)
-            Light.pos = BulletPosition
-            Light.r = TracerColor.r
-            Light.g = TracerColor.g
-            Light.b = TracerColor.b
-            Light.brightness = -4
-            Light.decay = 1000
-            Light.size = 512
-            Light.dietime = CurTime() + 0.05
-        end
-    end
-
-    return false
 end
 
 return PROJECTILE

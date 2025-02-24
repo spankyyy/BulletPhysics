@@ -60,25 +60,25 @@ if SERVER then
             local RandomDirection = VectorRand(-100, 100):GetNormalized()
 
             local bulletInfo = {
-                Class = "default_bullet",
+                Class = "shrapnel",
                 Src = self:GetPos(),
                 Dir = RandomDirection,
                 Num = 1,
                 Damage = 100,
                 Spread = Vector(0, 0),
-                Speed = UNIT.FT_TO_HAMMER(20000)
+                Speed = UNIT.FT_TO_HAMMER(600)
             }
 
             self:FireBullets(bulletInfo)
 
         end
         Explosion:SetOrigin(self:GetPos())
-        Explosion:SetMagnitude(32)
+        Explosion:SetMagnitude(0)
         Explosion:SetScale(0)
 
         util.Effect("Explosion", Explosion)
         
-        timer.Simple(0, function() self:Remove() end)
+        timer.Simple(0.01, function() self:Remove() end)
     end
 
     function ENT:Use(Activator)

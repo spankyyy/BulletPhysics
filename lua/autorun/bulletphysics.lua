@@ -118,5 +118,3 @@ hook.Add("PostEntityFireBullets", "BulletPhysics_FireBullets", function(Entity, 
     -- Suppress the bullet
     return false
 end)
-
-
