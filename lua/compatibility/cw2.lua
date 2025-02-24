@@ -2,6 +2,7 @@ AddCSLuaFile()
 
 local Base = weapons.GetStored("cw_base")
 
+if not IsValid(Base) then return end
 
 local bul = {}
 function Base:FireBullet(damage, cone, clumpSpread, bullets)
